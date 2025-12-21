@@ -283,15 +283,37 @@ if not st.session_state.logged_in:
                     st.error(res.get("msg", "Lỗi đăng nhập"))
 
 # 3. GIAO DIỆN ĐÃ ĐĂNG NHẬP THÀNH CÔNG
+# Trong file app.py, phần GIAO DIỆN ĐÃ ĐĂNG NHẬP
 else:
+    # Lưu thông tin hạn dùng vào session nếu mới đăng nhập
+    if "days_left" not in st.session_state and 'res' in locals():
+        st.session_state.days_left = res.get("days_left")
+        st.session_state.expiry_date = res.get("expiry_date")
+
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
+    
     with c_logo: 
         st.markdown("### 🦅 TAMDUY TRADER")
+    
     with c_input: 
-        # Để trống mặc định để người dùng tự nhập mã
-        symbol = st.text_input("MÃ CK", "", label_visibility="collapsed", placeholder="Nhập mã (VD: HPG)").upper()
-    with c_user: 
-        st.write(f"Operator: **{st.session_state.name}**")
+        symbol = st.text_input("MÃ CK", "", label_visibility="collapsed", placeholder="Nhập mã...").upper()
+    
+    with c_user:
+        # HIỂN THỊ THÔNG BÁO HẠN SỬ DỤNG Ở ĐÂY
+        days = st.session_state.get('days_left', 0)
+        expiry = st.session_state.get('expiry_date', 'N/A')
+        
+        color = "#ff4b4b" if days <= 7 else "#29b045" # Đỏ nếu dưới 7 ngày, xanh nếu còn dài
+        
+        st.markdown(f"""
+            <div style='text-align: right; line-height: 1.2;'>
+                User: <b>{st.session_state.name}</b> <br>
+                <span style='color: {color}; font-size: 0.85rem;'>
+                    Hạn dùng: {expiry} (Còn {days} ngày)
+                </span>
+            </div>
+        """, unsafe_allow_html=True)
+
     with c_out: 
         if st.button("EXIT"): 
             st.session_state.logged_in = False
@@ -395,6 +417,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
