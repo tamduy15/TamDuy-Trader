@@ -249,46 +249,60 @@ def render_ai_analysis(df, symbol):
 # ---------------------------------------------------------
 # 6. GIAO DIỆN CHÍNH
 # ---------------------------------------------------------
-if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if st.session_state.logged_in and not db.check_token_valid(st.session_state.username, st.session_state.token):
-    st.session_state.logged_in = False; st.rerun()
+# 1. Quản lý trạng thái đăng nhập
+if 'logged_in' not in st.session_state: 
+    st.session_state.logged_in = False
 
+# Kiểm tra tính hợp lệ của token (Nếu bị khóa trên Sheet, web tự văng ra)
+if st.session_state.logged_in and not db.check_token_valid(st.session_state.username, st.session_state.token):
+    st.session_state.logged_in = False
+    st.rerun()
+
+# 2. GIAO DIỆN CHƯA ĐĂNG NHẬP
 if not st.session_state.logged_in:
     c1, c2, c3 = st.columns([1, 1, 1])
     with c2:
         st.markdown("<br><h1 style='text-align: center; color: #d4af37;'>TAMDUY CAPITAL</h1>", unsafe_allow_html=True)
-        with st.form("login"):
-            u = st.text_input("Username"); p = st.text_input("Password", type="password")
-          # Kiểm tra đúng dòng 262 (if st.form_submit_button...)
-with st.form("login"):
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
-    if st.form_submit_button("LOGIN TERMINAL", use_container_width=True):
-        res = db.login_user(u, p)
-        if res["status"] == "success":
-            st.session_state.update(
-                logged_in=True, 
-                username=u, 
-                name=res["name"], 
-                role=res["role"], 
-                token=res["token"]
-            )
-            # Hiển thị thông báo nếu gần hết hạn
-            if res.get("msg"):
-                st.warning(res["msg"])
-                time.sleep(2)
-            st.rerun()
-        else:
-            # Hiện lỗi cụ thể: Sai pass, hết hạn, hoặc bị khóa
-            st.error(res.get("msg", "Lỗi đăng nhập"))
+        with st.form("login_form"):
+            u = st.text_input("Username")
+            p = st.text_input("Password", type="password")
+            
+            if st.form_submit_button("LOGIN TERMINAL", use_container_width=True):
+                res = db.login_user(u, p)
+                if res["status"] == "success":
+                    st.session_state.update(
+                        logged_in=True, 
+                        username=u, 
+                        name=res["name"], 
+                        role=res["role"], 
+                        token=res["token"]
+                    )
+                    # Thông báo thời hạn sử dụng nếu có
+                    if res.get("msg"):
+                        st.toast(res["msg"], icon="⚠️")
+                        time.sleep(1.5)
+                    st.rerun()
+                else:
+                    # Báo lỗi: Sai pass, hết hạn, hoặc bị khóa
+                    st.error(res.get("msg", "Đăng nhập thất bại"))
+
+# 3. GIAO DIỆN ĐÃ ĐĂNG NHẬP THÀNH CÔNG
 else:
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
-    with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
-    with c_input: symbol = st.text_input("MÃ CK", "", label_visibility="collapsed").upper()
-    with c_user: st.write(f"Operator: **{st.session_state.name}**")
+    with c_logo: 
+        st.markdown("### 🦅 TAMDUY TRADER")
+    with c_input: 
+        # Để trống mặc định để người dùng tự nhập mã
+        symbol = st.text_input("MÃ CK", "", label_visibility="collapsed", placeholder="Nhập mã (VD: HPG)").upper()
+    with c_user: 
+        st.write(f"Operator: **{st.session_state.name}**")
     with c_out: 
-        if st.button("EXIT"): st.session_state.logged_in = False; st.rerun()
+        if st.button("EXIT"): 
+            st.session_state.logged_in = False
+            st.rerun()
     st.markdown("---")
+    
+    # Tiếp tục phần xử lý biểu đồ bên dưới...
 
     if symbol:
         d = get_market_data(symbol)
@@ -385,6 +399,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
