@@ -1,77 +1,80 @@
 import streamlit as st
 import pandas as pd
 import uuid
+from datetime import datetime, timedelta
 
-# Link Sheets (Sử dụng link công khai để đơn giản hóa cho bạn)
-# Chú ý: Thay ID_FILE_CUA_BAN bằng ID bạn vừa lấy ở Bước 1
+# ID file Google Sheets của bạn
 SHEET_ID = "ID_FILE_CUA_BAN" 
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/1rLautBfQowqcAw9gq2VCfK3UyqUIglnOzZQLqVHhvNs/gviz/tq?tqx=out:csv"
 
-# Hàm đọc dữ liệu từ Sheets
 def get_all_users():
     try:
-        df = pd.read_csv(SHEET_URL)
+        # Thêm biến số ngẫu nhiên để tránh Google cache dữ liệu cũ
+        url = f"{SHEET_URL}&cache={uuid.uuid4()}"
+        df = pd.read_csv(url)
         return df
-    except:
-        return pd.DataFrame(columns=['username', 'password', 'name', 'role', 'active_token', 'status'])
-
-# Hàm lưu dữ liệu (Dành cho bản đơn giản: dùng st.cache hoặc ghi log)
-# Lưu ý: Để ghi dữ liệu thật lên Sheets cần cấu hình Service Account phức tạp hơn.
-# Ở đây mình hướng dẫn cách 'giả lập' an toàn để bạn chạy được ngay.
-def init_db():
-    pass
+    except Exception as e:
+        st.error(f"Lỗi đọc Sheets: {e}")
+        return pd.DataFrame()
 
 def login_user(username, password):
     df = get_all_users()
-    # Tìm user
-    user_row = df[df['username'] == str(username)]
+    if df.empty: return {"status": "fail", "msg": "Không thể kết nối dữ liệu"}
+
+    # Tìm user (ép kiểu về string để so sánh)
+    user_row = df[df['username'].astype(str) == str(username)]
     
     if not user_row.empty:
-        stored_pw = str(user_row.iloc[0]['password'])
-        status = user_row.iloc[0]['status']
+        row = user_row.iloc[0]
         
-        if status == 'locked':
-            return {"status": "locked"}
+        # 1. Kiểm tra mật khẩu
+        if str(password) != str(row['password']):
+            return {"status": "fail", "msg": "Sai mật khẩu"}
+
+        # 2. Kiểm tra trạng thái Status (Cột F)
+        if str(row['status']).upper() != 'TRUE':
+            return {"status": "fail", "msg": "Tài khoản đã bị khóa"}
+
+        # 3. Kiểm tra thời hạn (Cột G và H)
+        try:
+            open_date = pd.to_datetime(row['date_open'])
+            months = int(row['expiry_months'])
+            # Tính ngày hết hạn (giả định 1 tháng = 30 ngày cho đơn giản)
+            expiry_date = open_date + timedelta(days=months * 30)
+            today = datetime.now()
             
-        if str(password) == stored_pw:
-            new_token = str(uuid.uuid4())
-            # Trong bản Sheets công khai, ta lưu token vào session tạm thời
-            return {
-                "status": "success", 
-                "name": user_row.iloc[0]['name'], 
-                "role": user_row.iloc[0]['role'], 
-                "token": new_token
-            }
+            days_left = (expiry_date - today).days
             
-    return {"status": "fail"}
+            if days_left <= 0:
+                return {"status": "fail", "msg": "Tài khoản đã hết hạn sử dụng"}
+        except:
+            return {"status": "fail", "msg": "Lỗi định dạng ngày tháng trên Sheets"}
+
+        # 4. Xử lý Active Token (Chỉ cho phép 1 nơi đăng nhập)
+        # Vì đây là bản Read-only, ta lưu token vào session của trình duyệt.
+        # Muốn đá người cũ ra, bạn cần cấu hình quyền Ghi (Write) để cập nhật token lên Sheets.
+        new_token = str(uuid.uuid4())
+        
+        msg_expiry = f"Thời hạn còn lại: {days_left} ngày." if days_left <= 7 else ""
+        
+        return {
+            "status": "success", 
+            "name": row['name'], 
+            "role": row['role'], 
+            "token": new_token,
+            "msg": msg_expiry
+        }
+            
+    return {"status": "fail", "msg": "Tài khoản không tồn tại"}
 
 def check_token_valid(username, current_token):
-    # Với Sheets, ta tạm chấp nhận token từ session để tránh ghi file liên tục
-    return True 
+    # Với bản Google Sheets Read-only, ta kiểm tra status còn True hay không
+    df = get_all_users()
+    user_row = df[df['username'].astype(str) == str(username)]
+    if not user_row.empty:
+        return str(user_row.iloc[0]['status']).upper() == 'TRUE'
+    return False
 
-import requests
-
-def create_user(username, password, name, role="user"):
-    # Thay link Form của bạn vào đây (nhớ giữ đoạn /formResponse)
-    FORM_URL = "https://docs.google.com/forms/d/e/ID_FORM_CUA_BAN/formResponse"
-    
-    # Thay các số entry.xxx tương ứng bạn vừa tìm được ở Bước 2
-    payload = {
-        "entry.169361782": username,
-        "entry.779502312": password,
-        "entry.63670389": name,
-        "entry.1477975338": role,
-        "entry.65172968": "none",
-        "entry.666666": "active"
-    }
-    
-    try:
-        res = requests.post(FORM_URL, data=payload)
-        return res.status_code == 200
-    except:
-        return False
-
-def toggle_user_status(username, new_status):
-    st.info(f"Hãy vào Google Sheets đổi cột status của {username} thành {new_status}")
-
-
+# Các hàm Admin để tương thích với app.py cũ (Bạn nên sửa trên Sheets trực tiếp)
+def toggle_user_status(username, status): pass
+def create_user(u, p, n, r): pass
