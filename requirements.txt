@@ -5,5 +5,4 @@ pandas_ta
 plotly
 requests
 bcrypt
-xnoapi
-matplotlib
+psycopg2-binary
