@@ -5,7 +5,7 @@ import uuid
 # Link Sheets (Sử dụng link công khai để đơn giản hóa cho bạn)
 # Chú ý: Thay ID_FILE_CUA_BAN bằng ID bạn vừa lấy ở Bước 1
 SHEET_ID = "ID_FILE_CUA_BAN" 
-SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv"
+SHEET_URL = f"https://docs.google.com/spreadsheets/d/1rLautBfQowqcAw9gq2VCfK3UyqUIglnOzZQLqVHhvNs/gviz/tq?tqx=out:csv"
 
 # Hàm đọc dữ liệu từ Sheets
 def get_all_users():
@@ -55,3 +55,4 @@ def create_user(username, password, name, role="user"):
 
 def toggle_user_status(username, new_status):
     st.info(f"Hãy vào Google Sheets đổi cột status của {username} thành {new_status}")
+
