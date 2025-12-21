@@ -260,23 +260,27 @@ if not st.session_state.logged_in:
         with st.form("login"):
             u = st.text_input("Username"); p = st.text_input("Password", type="password")
           # Kiểm tra đúng dòng 262 (if st.form_submit_button...)
-if st.form_submit_button("LOGIN TERMINAL", use_container_width=True):
-    # Dòng này PHẢI thụt vào 4 dấu cách so với chữ 'if' ở trên
-    res = db.login_user(u, p) 
-    
-    if res["status"] == "success":
-        st.session_state.update(
-            logged_in=True, 
-            username=u, 
-            name=res["name"], 
-            role=res["role"], 
-            token=res["token"]
-        )
-        if res.get("msg"): # Hiển thị thông báo thời hạn nếu có
-            st.toast(res["msg"], icon="⚠️")
-        st.rerun()
-    else:
-        st.error(res.get("msg", "Đăng nhập thất bại"))
+with st.form("login"):
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
+    if st.form_submit_button("LOGIN TERMINAL", use_container_width=True):
+        res = db.login_user(u, p)
+        if res["status"] == "success":
+            st.session_state.update(
+                logged_in=True, 
+                username=u, 
+                name=res["name"], 
+                role=res["role"], 
+                token=res["token"]
+            )
+            # Hiển thị thông báo nếu gần hết hạn
+            if res.get("msg"):
+                st.warning(res["msg"])
+                time.sleep(2)
+            st.rerun()
+        else:
+            # Hiện lỗi cụ thể: Sai pass, hết hạn, hoặc bị khóa
+            st.error(res.get("msg", "Lỗi đăng nhập"))
 else:
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
     with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
@@ -381,6 +385,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
