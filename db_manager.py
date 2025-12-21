@@ -49,10 +49,29 @@ def check_token_valid(username, current_token):
     # Với Sheets, ta tạm chấp nhận token từ session để tránh ghi file liên tục
     return True 
 
+import requests
+
 def create_user(username, password, name, role="user"):
-    st.warning("Tính năng đăng ký đang bảo trì. Hãy thêm trực tiếp vào file Google Sheets!")
-    return False
+    # Thay link Form của bạn vào đây (nhớ giữ đoạn /formResponse)
+    FORM_URL = "https://docs.google.com/forms/d/e/ID_FORM_CUA_BAN/formResponse"
+    
+    # Thay các số entry.xxx tương ứng bạn vừa tìm được ở Bước 2
+    payload = {
+        "entry.169361782": username,
+        "entry.779502312": password,
+        "entry.63670389": name,
+        "entry.1477975338": role,
+        "entry.65172968": "none",
+        "entry.666666": "active"
+    }
+    
+    try:
+        res = requests.post(FORM_URL, data=payload)
+        return res.status_code == 200
+    except:
+        return False
 
 def toggle_user_status(username, new_status):
     st.info(f"Hãy vào Google Sheets đổi cột status của {username} thành {new_status}")
+
 
