@@ -260,10 +260,17 @@ if not st.session_state.logged_in:
         with st.form("login"):
             u = st.text_input("Username"); p = st.text_input("Password", type="password")
             if st.form_submit_button("LOGIN TERMINAL", use_container_width=True):
-                res = db.login_user(u, p)
-                if res["status"] == "success": st.session_state.update(logged_in=True, username=u, name=res["name"], role=res["role"], token=res["token"]); st.rerun()
-                elif res["status"] == "locked": st.error("LOCKED")
-                else: st.error("FAILED")
+    res = db.login_user(u, p)
+    if res["status"] == "success":
+        st.session_state.update(logged_in=True, username=u, name=res["name"], role=res["role"], token=res["token"])
+        if res["msg"]: # Nếu có thông báo hết hạn
+            st.toast(res["msg"], icon="⚠️")
+            time.sleep(1)
+        st.rerun()
+    elif res["status"] == "locked":
+        st.error("Tài khoản bị khóa")
+    else:
+        st.error(res.get("msg", "Đăng nhập thất bại"))
 else:
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
     with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
@@ -368,5 +375,6 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
