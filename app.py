@@ -269,7 +269,6 @@ else:
         d = get_market_data(symbol)
         if not d["error"]:
             df = run_strategy_full(d["df"])
-            # Tính toán hiệu suất trước khi hiển thị HUD
             ret_bt, win_bt, trades_bt, logs_bt, duration_days = run_backtest_fast(df)
             last = df.iloc[-1]
             
@@ -282,7 +281,6 @@ else:
             k4.markdown(f"<div class='hud-box'><div class='hud-val' style='color:#00FF00'>{last['T1']:,.1f}</div><div class='hud-lbl'>TARGET 1</div></div>", unsafe_allow_html=True)
             k5.markdown(f"<div class='hud-box'><div class='hud-val' style='color:#00E5FF'>{last['T2']:,.1f}</div><div class='hud-lbl'>TARGET 2</div></div>", unsafe_allow_html=True)
 
-            # Thống kê hiệu suất chiến lược ngay dưới HUD
             p1, p2, p3, p4 = st.columns(4)
             p1.markdown(f"<div class='perf-box'><div class='perf-val'>{trades_bt}</div><div class='perf-lbl'>TỔNG SỐ LỆNH</div></div>", unsafe_allow_html=True)
             p2.markdown(f"<div class='perf-box'><div class='perf-val'>{win_bt:.1f}%</div><div class='perf-lbl'>TỶ LỆ THẮNG</div></div>", unsafe_allow_html=True)
@@ -305,7 +303,6 @@ else:
                 df_neg = df[df['Trend_Phase'] == 'NEGATIVE']
                 df_sdw = df[df['Trend_Phase'] == 'SIDEWAY']
 
-                # NẾN NHẬT: Xanh (Tích cực), Đỏ (Tiêu cực), Vàng (Lưỡng lự)
                 for trend_df, color_up, color_down, name in [
                     (df_pos, '#00E676', '#00E676', 'Positive'),
                     (df_neg, '#FF1744', '#FF1744', 'Negative'),
@@ -318,59 +315,54 @@ else:
                             name=name,
                             increasing_line_color=color_up, increasing_fillcolor=color_up,
                             decreasing_line_color=color_down, decreasing_fillcolor=color_down,
-                            whiskerwidth=0.9 # Làm nến mập ra
+                            whiskerwidth=0.9
                         ), row=1, col=1)
 
-                # SL/Target Lines
                 fig.add_hline(y=last['SL'], line_dash="dash", line_color="#FF4B4B", annotation_text="SL", row=1, col=1)
                 fig.add_hline(y=last['T1'], line_dash="dash", line_color="#00FF00", annotation_text="T1", row=1, col=1)
                 fig.add_hline(y=last['T2'], line_dash="dash", line_color="#00E5FF", annotation_text="T2", row=1, col=1)
-
                 fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='#2962FF', width=1.5), name='MA50'), row=1, col=1)
                 
-                # Signal markers (Green for Buy, Red for Sell)
                 buys = df[df['SIGNAL'] == 'MUA']
                 if not buys.empty: fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.98, mode='markers', marker=dict(symbol='triangle-up', size=16, color='#00FF00', line=dict(width=1.5, color='white')), name='BUY Signal'), row=1, col=1)
                 sells = df[df['SIGNAL'] == 'BÁN']
                 if not sells.empty: fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.02, mode='markers', marker=dict(symbol='triangle-down', size=16, color='#FF1744', line=dict(width=1.5, color='white')), name='SELL Signal'), row=1, col=1)
 
-                # Indicators
                 fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=['#00C853' if c >= o else '#FF3D00' for c, o in zip(df['close'], df['open'])], name='Volume'), row=2, col=1)
                 fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=['#00C853' if h > 0 else '#FF3D00' for h in df['MACD_Hist']]), row=3, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#AA00FF')), row=4, col=1)
 
-                # Chuyển trục tung sang bên phải
-                fig.update_yaxes(side="right", row=1, col=1)
-                fig.update_yaxes(side="right", row=2, col=1)
-                fig.update_yaxes(side="right", row=3, col=1)
-                fig.update_yaxes(side="right", row=4, col=1)
+                # CẤU HÌNH TRỤC VÀ ZOOM
+                # Chuyển trục tung sang phải và tắt đường lưới trắng gây rối
+                for r in range(1, 5):
+                    fig.update_yaxes(side="right", showgrid=True, gridcolor='#1f1f1f', zeroline=False, row=r, col=1)
+                    fig.update_xaxes(showgrid=False, zeroline=False, row=r, col=1)
 
-                # Thiết lập mặc định hiển thị 90 phiên (~3 tháng) để nến mập rõ ràng
+                # ZOOM CHUẨN: 90 ngày (~3 tháng) - Đảm bảo áp dụng cho trục X dùng chung
                 if len(df) > 90:
-                    start_zoom = df.index[-90]
-                    end_zoom = df.index[-1]
-                    fig.update_xaxes(range=[start_zoom, end_zoom], row=1, col=1)
-                elif len(df) > 0:
-                    fig.update_xaxes(range=[df.index[0], df.index[-1]], row=1, col=1)
+                    start_date = df.index[-90]
+                    end_date = df.index[-1]
+                    fig.update_xaxes(range=[start_date, end_date])
 
-                fig.update_layout(height=850, paper_bgcolor='#000', plot_bgcolor='#080808', margin=dict(l=0, r=50, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False)
-                # Kích hoạt scrollZoom trong config
-                st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
+                fig.update_layout(
+                    height=850, 
+                    paper_bgcolor='#000', 
+                    plot_bgcolor='#080808', 
+                    margin=dict(l=0, r=60, t=30, b=0), 
+                    showlegend=False, 
+                    xaxis_rangeslider_visible=False, # Tắt thanh trượt màu trắng dưới nến
+                    hovermode='x unified'
+                )
                 
-                # --- TABS: LOGS ---
+                st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': False})
+                
                 t1, t2 = st.tabs(["📋 NHẬT KÝ LỆNH", "⚙️ QUẢN TRỊ"])
-                
                 with t1:
                     if not logs_bt.empty:
                         def style_pnl(val):
                             color = '#1b5e20' if val > 0 else '#b71c1c'
                             return f'background-color: {color}; color: white; font-weight: bold; border: 1px solid #333;'
-                        
-                        st.dataframe(
-                            logs_bt.style.applymap(style_pnl, subset=['Lãi/Lỗ %'])
-                            .format({"Giá Mua": "{:,.2f}", "Giá Bán": "{:,.2f}", "Lãi/Lỗ %": "{:+.2f}%"}), 
-                            use_container_width=True
-                        )
+                        st.dataframe(logs_bt.style.applymap(style_pnl, subset=['Lãi/Lỗ %']).format({"Giá Mua": "{:,.2f}", "Giá Bán": "{:,.2f}", "Lãi/Lỗ %": "{:+.2f}%"}), use_container_width=True)
                     else: st.info("Hệ thống chưa ghi nhận lệnh thực tế.")
                 
                 with t2:
