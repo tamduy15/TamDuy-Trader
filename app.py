@@ -15,7 +15,7 @@ import requests
 st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🦅", initial_sidebar_state="collapsed")
 db.init_db()
 
-# --- CSS: PRO TRADING TERMINAL (CLEAN MODE) ---
+# --- CSS: PRO TRADING TERMINAL (DARK MODE) ---
 st.markdown("""
 <style>
     .stApp {background-color: #000000; color: #e0e0e0;}
@@ -85,29 +85,24 @@ def get_market_data(symbol):
     return data
 
 # ---------------------------------------------------------
-# 3. STRATEGY ENGINE (ADVANCED)
+# 3. STRATEGY ENGINE
 # ---------------------------------------------------------
 def run_strategy_full(df):
     if len(df) < 52: return df
     df = df.copy()
     
-    # INDICATORS CƠ BẢN
+    # INDICATORS
     df['MA20'] = df.ta.sma(length=20)
     df['MA50'] = df.ta.sma(length=50)
     df['MA200'] = df.ta.sma(length=200)
     df['AvgVol'] = df.ta.sma(close='volume', length=50)
     df['ATR'] = df.ta.atr(length=14)
     
-    # ADX SỨC MẠNH XU HƯỚNG
     try:
         adx_df = df.ta.adx(length=14)
         df['ADX'] = adx_df['ADX_14']
-        df['DMP'] = adx_df['DMP_14']
-        df['DMN'] = adx_df['DMN_14']
-    except: 
-        df['ADX'] = 0; df['DMP'] = 0; df['DMN'] = 0
+    except: df['ADX'] = 0
 
-    # MACD & RSI
     macd = df.ta.macd(fast=12, slow=26, signal=9)
     if macd is not None:
         df['MACD'] = macd['MACD_12_26_9']
@@ -115,35 +110,27 @@ def run_strategy_full(df):
         df['MACD_Hist'] = macd['MACDh_12_26_9']
     df['RSI'] = df.ta.rsi(length=14)
     
-    # ICHIMOKU CLOUD
+    # ICHIMOKU
     h9 = df['high'].rolling(9).max(); l9 = df['low'].rolling(9).min(); df['Tenkan'] = (h9 + l9) / 2
     h26 = df['high'].rolling(26).max(); l26 = df['low'].rolling(26).min(); df['Kijun'] = (h26 + l26) / 2
     df['SpanA'] = ((df['Tenkan'] + df['Kijun']) / 2).shift(26)
     h52 = df['high'].rolling(52).max(); l52 = df['low'].rolling(52).min(); df['SpanB'] = ((h52 + l52) / 2).shift(26)
     
-    # TREND PHASE: NGUYÊN TẮC CŨ (GIÁ VS MA50)
-    conditions = [(df['close'] > df['MA50']), (df['close'] < df['MA50'])]
-    choices = ['POSITIVE', 'NEGATIVE']
-    df['Trend_Phase'] = np.select(conditions, choices, default='SIDEWAY')
+    # TREND PHASE
+    df['Trend_Phase'] = 'SIDEWAY'
+    df.loc[df['close'] > df['MA50'], 'Trend_Phase'] = 'POSITIVE'
+    df.loc[df['close'] < df['MA50'], 'Trend_Phase'] = 'NEGATIVE'
 
-    # SIGNALS & QUẢN TRỊ RỦI RO (TARGET/STOPLOSS)
-    hhv_20 = df['high'].rolling(20).max().shift(1)
-    llv_20 = df['low'].rolling(20).min().shift(1)
-    
-    # Tính toán Stoploss/Target động
+    # TARGET / STOPLOSS
     df['SL'] = np.where(df['close'] > df['MA50'], 
                         np.maximum(df['MA50'], df['Kijun']) - (0.5 * df['ATR']), 
                         df['close'] - (2 * df['ATR']))
-    
     df['T1'] = df['close'] + 1.5 * (df['close'] - df['SL']).abs()
     df['T2'] = df['close'] + 3.0 * (df['close'] - df['SL']).abs()
 
-    # Tín hiệu Pocket Pivot / Breakout
-    breakout = (df['close'] > hhv_20) & (df['volume'] > 1.3 * df['AvgVol']) & (df['close'] > df['MA50'])
-    down_vol_10 = pd.Series(np.where(df['close'] < df['close'].shift(1), df['volume'], 0), index=df.index).rolling(10).max().shift(1)
-    pocket = (df['volume'] > down_vol_10) & (df['close'] > df['MA20']) & (df['close'] > df['close'].shift(1))
-    
-    buy_cond = (breakout | pocket) & (df['close'] > df['MA200'])
+    # SIGNALS
+    hhv_20 = df['high'].rolling(20).max().shift(1)
+    buy_cond = (df['close'] > hhv_20) & (df['volume'] > 1.2 * df['AvgVol']) & (df['close'] > df['MA200'])
     sell_cond = (df['close'] < df['MA20']) & (df['close'].shift(1) >= df['MA20'].shift(1))
     
     signals = []; pos = 0
@@ -165,23 +152,36 @@ def run_backtest_fast(df):
     capital = 1_000_000_000; cash = capital; shares = 0; equity = []
     trades = 0; wins = 0; trade_logs = []
     
+    if df.empty: return 0, 0, 0, pd.DataFrame(), 0
+    
+    start_date = df.index[0]
+    end_date = df.index[-1]
+    duration_days = (end_date - start_date).days
+    
     for i in range(len(df)):
         price = df['close'].iloc[i]; sig = df['SIGNAL'].iloc[i]; date = df.index[i]
         if sig == 'MUA' and cash > 0:
             shares = cash // price; cash -= shares * price; entry = price; entry_date = date
         elif sig == 'BÁN' and shares > 0:
-            cash += shares * price; trades += 1; pnl = (price - entry)/entry
+            pnl = (price - entry)/entry
+            trades += 1
             if pnl > 0: wins += 1
-            trade_logs.append({"Ngày Mua": entry_date, "Giá Mua": entry, "Ngày Bán": date, "Giá Bán": price, "Lãi/Lỗ %": pnl*100})
-            shares = 0
+            trade_logs.append({
+                "Ngày Mua": entry_date.strftime('%d/%m/%Y'), 
+                "Giá Mua": entry, 
+                "Ngày Bán": date.strftime('%d/%m/%Y'), 
+                "Giá Bán": price, 
+                "Lãi/Lỗ %": pnl*100
+            })
+            cash += shares * price; shares = 0
         equity.append(cash + (shares * price))
         
     ret = (equity[-1] - capital)/capital * 100
     win_rate = (wins/trades * 100) if trades > 0 else 0
-    return ret, win_rate, trades, pd.DataFrame(trade_logs)
+    return ret, win_rate, trades, pd.DataFrame(trade_logs), duration_days
 
 # ---------------------------------------------------------
-# 5. AI TECHNICAL ADVISOR (ENHANCED)
+# 5. AI TECHNICAL ADVISOR
 # ---------------------------------------------------------
 def render_ai_analysis(df, symbol):
     last = df.iloc[-1]
@@ -191,44 +191,32 @@ def render_ai_analysis(df, symbol):
     rsi = last['RSI']
     rsi_st = "QUÁ MUA" if rsi > 70 else "QUÁ BÁN" if rsi < 30 else "TRUNG TÍNH"
     
-    span_a = last.get('SpanA', 0); span_b = last.get('SpanB', 0)
-    cloud_st = "TRÊN MÂY (TÍCH CỰC)" if last['close'] > max(span_a, span_b) else "DƯỚI MÂY (TIÊU CỰC)" if last['close'] < min(span_a, span_b) else "TRONG MÂY"
-    cloud_color = "#00FF00" if "TÍCH CỰC" in cloud_st else "#FF4B4B" if "TIÊU CỰC" in cloud_st else "#FFD700"
-    
     phase = last.get('Trend_Phase', 'SIDEWAY')
     phase_text = "TÍCH CỰC (UPTREND)" if phase == 'POSITIVE' else "TIÊU CỰC (DOWNTREND)"
     phase_color = "#00FF00" if phase == 'POSITIVE' else "#FF4B4B"
     
-    rr_ratio = (last['T1'] - last['close']) / (last['close'] - last['SL']) if (last['close'] - last['SL']) != 0 else 0
-    rr_st = "HẤP DẪN" if rr_ratio >= 1.5 else "KÉM"
-
     html = f"""
 <div class='ai-panel'>
-<div class='ai-title'>🤖 AI TECHNICAL ADVISOR - {symbol}</div>
+<div class='ai-title'>🤖 AI ADVISOR - {symbol}</div>
 <div class='ai-text'>
-<p><b>1. CẤU TRÚC XU HƯỚNG:</b><br>
+<p><b>1. XU HƯỚNG:</b><br>
 • Giai đoạn: <span style='color:{phase_color}'><b>{phase_text}</b></span><br>
-• Sức mạnh xu hướng (ADX): <b>{adx:.1f} ({adx_st})</b><br>
-• Vị thế Ichimoku: <span style='color:{cloud_color}'><b>{cloud_st}</b></span></p>
+• Sức mạnh (ADX): <b>{adx:.1f} ({adx_st})</b></p>
 
-<p><b>2. ĐỘNG LƯỢNG KỸ THUẬT:</b><br>
+<p><b>2. ĐỘNG LƯỢNG:</b><br>
 • RSI (14): <b>{rsi:.1f} ({rsi_st})</b><br>
-• MACD: <b>{'Hội tụ/Cắt lên' if last['MACD']>last['MACD_Signal'] else 'Phân kỳ/Cắt xuống'}</b><br>
-• Khối lượng: <b>{(last['volume']/last['AvgVol']):.1f}x</b> trung bình 50 phiên</p>
+• MACD: <b>{'Tích cực' if last['MACD']>last['MACD_Signal'] else 'Tiêu cực'}</b></p>
 
 <div class='ai-expert-box'>
-<b>🎯 MỤC TIÊU & QUẢN TRỊ RỦI RO:</b><br>
-• <b>Vùng Mua Kiến nghị:</b> {last['close'] * 0.99:,.1f} - {last['close'] * 1.01:,.1f}<br>
-• <span style='color:#FF4B4B;'><b>Dừng lỗ (SL): {last['SL']:,.1f}</b></span> (Phòng vệ dưới hỗ trợ)<br>
-• <span style='color:#00FF00;'><b>Mục tiêu 1 (T1): {last['T1']:,.1f}</b></span> (+{(last['T1']/last['close']-1)*100:.1f}%)<br>
-• <span style='color:#00E5FF;'><b>Mục tiêu 2 (T2): {last['T2']:,.1f}</b></span> (+{(last['T2']/last['close']-1)*100:.1f}%)<br>
-• Tỷ lệ Risk/Reward: <b>1:{rr_ratio:.1f} ({rr_st})</b>
+<b>🎯 CHIẾN LƯỢC QUẢN TRỊ:</b><br>
+• <span style='color:#FF4B4B;'><b>Dừng lỗ (SL): {last['SL']:,.1f}</b></span><br>
+• <span style='color:#00FF00;'><b>Chốt lời 1: {last['T1']:,.1f}</b></span><br>
+• <span style='color:#00E5FF;'><b>Chốt lời 2: {last['T2']:,.1f}</b></span>
 </div>
 
-<p><b>💡 NHẬN ĐỊNH CHUYÊN SÂU:</b><br>
-{f"Thị trường đang trong pha tăng giá mạnh với ADX > 25. Ưu tiên giải ngân tại các nhịp rung lắc về vùng MA50 ({last['MA50']:,.1f})." if phase == 'POSITIVE' and adx > 25 
-else f"Thị trường đang suy yếu, giá nằm dưới MA50. Khuyến nghị đứng ngoài hoặc hạ tỷ trọng về mức an toàn." if phase == 'NEGATIVE' 
-else "Trạng thái đi ngang tích lũy. Cần quan sát thêm tín hiệu bùng nổ khối lượng để xác nhận xu hướng mới."}</p>
+<p><b>💡 NHẬN ĐỊNH:</b><br>
+{f"Xu hướng đang ủng hộ bên Mua. Ưu tiên giữ vị thế và gia tăng khi giá test MA50." if phase == 'POSITIVE' 
+else "Rủi ro đang ở mức cao. Giá nằm dưới ngưỡng trung bình an toàn. Hạn chế mua mới."}</p>
 </div>
 </div>
 """
@@ -273,10 +261,10 @@ else:
         d = get_market_data(symbol)
         if not d["error"]:
             df = run_strategy_full(d["df"])
-            ret_bt, win_bt, trades_bt, logs_bt = run_backtest_fast(df)
+            ret_bt, win_bt, trades_bt, logs_bt, duration_days = run_backtest_fast(df)
             last = df.iloc[-1]
             
-            # --- HUD ---
+            # --- HUD METRICS ---
             k1, k2, k3, k4, k5 = st.columns(5)
             k1.markdown(f"<div class='hud-box'><div class='hud-val'>{last['close']:,.2f}</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
             s_col = "#00FF00" if "MUA" in last['SIGNAL'] else "#FF4B4B" if "BÁN" in last['SIGNAL'] else "#888"
@@ -296,73 +284,85 @@ else:
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(0, 255, 0, 0.05)', line=dict(width=0), showlegend=False), row=1, col=1)
                 
-                # --- PHÂN LOẠI NẾN THEO TREND PHASE (NGUYÊN TẮC CŨ) ---
+                # Candlestick Groups
                 df_pos = df[df['Trend_Phase'] == 'POSITIVE']
                 df_neg = df[df['Trend_Phase'] == 'NEGATIVE']
                 df_sdw = df[df['Trend_Phase'] == 'SIDEWAY']
 
-                # Nến Xanh (Positive): Ưu tiên Hold/Mua thêm
-                if not df_pos.empty:
-                    fig.add_trace(go.Candlestick(
-                        x=df_pos.index, open=df_pos['open'], high=df_pos['high'], low=df_pos['low'], close=df_pos['close'],
-                        name='Positive', increasing_line_color='#00E676', increasing_fillcolor='#00E676',
-                        decreasing_line_color='#00C853', decreasing_fillcolor='#00C853'
-                    ), row=1, col=1)
+                # NẾN NHẬT: Xanh (Tích cực), Đỏ (Tiêu cực), Vàng (Lưỡng lự)
+                for trend_df, color_up, color_down, name in [
+                    (df_pos, '#00E676', '#00E676', 'Positive'),
+                    (df_neg, '#FF1744', '#FF1744', 'Negative'),
+                    (df_sdw, '#FFD600', '#FFD600', 'Sideway')
+                ]:
+                    if not trend_df.empty:
+                        fig.add_trace(go.Candlestick(
+                            x=trend_df.index, open=trend_df['open'], high=trend_df['high'], 
+                            low=trend_df['low'], close=trend_df['close'],
+                            name=name,
+                            increasing_line_color=color_up, increasing_fillcolor=color_up,
+                            decreasing_line_color=color_down, decreasing_fillcolor=color_down,
+                            whiskerwidth=0.8
+                        ), row=1, col=1)
 
-                # Nến Đỏ (Negative): Tiêu cực, nên bán sớm
-                if not df_neg.empty:
-                    fig.add_trace(go.Candlestick(
-                        x=df_neg.index, open=df_neg['open'], high=df_neg['high'], low=df_neg['low'], close=df_neg['close'],
-                        name='Negative', increasing_line_color='#FF1744', increasing_fillcolor='#FF1744',
-                        decreasing_line_color='#D50000', decreasing_fillcolor='#D50000'
-                    ), row=1, col=1)
-                
-                # Nến Vàng (Sideway): Thăm dò
-                if not df_sdw.empty:
-                    fig.add_trace(go.Candlestick(
-                        x=df_sdw.index, open=df_sdw['open'], high=df_sdw['high'], low=df_sdw['low'], close=df_sdw['close'],
-                        name='Sideway', increasing_line_color='#FFD600', increasing_fillcolor='#FFD600',
-                        decreasing_line_color='#FFAB00', decreasing_fillcolor='#FFAB00'
-                    ), row=1, col=1)
-
-                # Vẽ SL và Target
+                # SL/Target Lines
                 fig.add_hline(y=last['SL'], line_dash="dash", line_color="#FF4B4B", annotation_text="SL", row=1, col=1)
                 fig.add_hline(y=last['T1'], line_dash="dash", line_color="#00FF00", annotation_text="T1", row=1, col=1)
                 fig.add_hline(y=last['T2'], line_dash="dash", line_color="#00E5FF", annotation_text="T2", row=1, col=1)
 
                 fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='#2962FF', width=1.5), name='MA50'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['Kijun'], line=dict(color='#FF6D00', width=1), name='Kijun-sen'), row=1, col=1)
                 
-                # Signals markers
+                # Signal markers (Green for Buy, Red for Sell)
                 buys = df[df['SIGNAL'] == 'MUA']
-                if not buys.empty: fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.98, mode='markers', marker=dict(symbol='triangle-up', size=12, color='#FFFFFF'), name='Buy Signature'), row=1, col=1)
+                if not buys.empty: fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.98, mode='markers', marker=dict(symbol='triangle-up', size=14, color='#00FF00', line=dict(width=1, color='white')), name='BUY Signal'), row=1, col=1)
                 sells = df[df['SIGNAL'] == 'BÁN']
-                if not sells.empty: fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.02, mode='markers', marker=dict(symbol='triangle-down', size=12, color='#FFFFFF'), name='Sell Signature'), row=1, col=1)
+                if not sells.empty: fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.02, mode='markers', marker=dict(symbol='triangle-down', size=14, color='#FF1744', line=dict(width=1, color='white')), name='SELL Signal'), row=1, col=1)
 
-                # Volume, MACD, RSI
-                colors_vol = ['#00C853' if c >= o else '#FF3D00' for c, o in zip(df['close'], df['open'])]
-                fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=colors_vol, name='Volume'), row=2, col=1)
-                
+                # Indicators
+                fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=['#00C853' if c >= o else '#FF3D00' for c, o in zip(df['close'], df['open'])], name='Volume'), row=2, col=1)
                 fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=['#00C853' if h > 0 else '#FF3D00' for h in df['MACD_Hist']]), row=3, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#2962FF')), row=3, col=1)
-                
                 fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#AA00FF')), row=4, col=1)
-                fig.add_hline(y=70, line_dash="dot", line_color="red", row=4, col=1)
-                fig.add_hline(y=30, line_dash="dot", line_color="green", row=4, col=1)
+
+                # Chuyển trục tung sang bên phải
+                fig.update_yaxes(side="right", row=1, col=1)
+                fig.update_yaxes(side="right", row=2, col=1)
+                fig.update_yaxes(side="right", row=3, col=1)
+                fig.update_yaxes(side="right", row=4, col=1)
 
                 fig.update_layout(height=850, paper_bgcolor='#000', plot_bgcolor='#080808', margin=dict(l=0, r=50, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False)
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # --- TABS ---
-                t1, t2 = st.tabs(["📋 NHẬT KÝ LỆNH", "⚙️ QUẢN TRỊ"])
+                # --- TABS: PERFORMANCE & LOGS ---
+                t1, t2, t3 = st.tabs(["📋 NHẬT KÝ LỆNH", "📊 HIỆU SUẤT CHỈ BÁO", "⚙️ QUẢN TRỊ"])
+                
                 with t1:
-                    if not logs_bt.empty: st.dataframe(logs_bt.style.format({"Giá Mua": "{:,.2f}", "Giá Bán": "{:,.2f}", "Lãi/Lỗ %": "{:+.2f}"}), use_container_width=True)
-                    else: st.info("Hệ thống chưa ghi nhận lệnh trong giai đoạn này.")
+                    if not logs_bt.empty:
+                        # Làm đẹp bảng nhật ký lệnh với màu sắc ô lãi/lỗ
+                        def style_pnl(val):
+                            color = '#1b5e20' if val > 0 else '#b71c1c'
+                            return f'background-color: {color}; color: white; font-weight: bold; border: 1px solid #333;'
+                        
+                        st.dataframe(
+                            logs_bt.style.applymap(style_pnl, subset=['Lãi/Lỗ %'])
+                            .format({"Giá Mua": "{:,.2f}", "Giá Bán": "{:,.2f}", "Lãi/Lỗ %": "{:+.2f}%"}), 
+                            use_container_width=True
+                        )
+                    else: st.info("Hệ thống chưa ghi nhận lệnh thực tế.")
+                
                 with t2:
-                    st.write(f"Cấp độ tài khoản: **{st.session_state.role}**")
+                    st.markdown("### Thống kê hiệu suất chiến lược")
+                    c_perf1, c_perf2, c_perf3, c_perf4 = st.columns(4)
+                    c_perf1.metric("Tổng số lệnh", f"{trades_bt} lệnh")
+                    c_perf2.metric("Tỷ lệ thắng", f"{win_bt:.1f}%")
+                    c_perf3.metric("Lợi nhuận kỳ vọng", f"{ret_bt:.2f}%")
+                    c_perf4.metric("Thời gian theo dõi", f"{duration_days} ngày")
+                    
+                    st.caption("(*) Thống kê dựa trên dữ liệu lịch sử 3 năm gần nhất của mã cổ phiếu đang xem.")
+                    
+                with t3:
                     if st.session_state.role == "admin":
                         st.dataframe(db.get_all_users(), use_container_width=True)
-                    else: st.warning("Bạn không có quyền truy cập bảng quản trị.")
+                    else: st.warning("Cấp độ user hiện tại không cho phép truy cập quản trị hệ thống.")
 
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
