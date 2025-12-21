@@ -318,7 +318,7 @@ else:
                             name=name,
                             increasing_line_color=color_up, increasing_fillcolor=color_up,
                             decreasing_line_color=color_down, decreasing_fillcolor=color_down,
-                            whiskerwidth=1.0 # Làm nến mập ra
+                            whiskerwidth=0.9 # Làm nến mập ra
                         ), row=1, col=1)
 
                 # SL/Target Lines
@@ -345,11 +345,13 @@ else:
                 fig.update_yaxes(side="right", row=3, col=1)
                 fig.update_yaxes(side="right", row=4, col=1)
 
-                # Thiết lập mặc định hiển thị 60 ngày cuối để nến mập rõ ràng
-                if len(df) > 60:
-                    start_zoom = df.index[-60]
+                # Thiết lập mặc định hiển thị 90 phiên (~3 tháng) để nến mập rõ ràng
+                if len(df) > 90:
+                    start_zoom = df.index[-90]
                     end_zoom = df.index[-1]
                     fig.update_xaxes(range=[start_zoom, end_zoom], row=1, col=1)
+                elif len(df) > 0:
+                    fig.update_xaxes(range=[df.index[0], df.index[-1]], row=1, col=1)
 
                 fig.update_layout(height=850, paper_bgcolor='#000', plot_bgcolor='#080808', margin=dict(l=0, r=50, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False)
                 # Kích hoạt scrollZoom trong config
@@ -379,5 +381,3 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
-
-
