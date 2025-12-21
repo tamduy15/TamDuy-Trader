@@ -7,12 +7,13 @@ from datetime import datetime
 
 # Cấu hình quyền truy cập
 def get_sheet():
-    # Đọc thông tin từ mục [gcp_service_account] trong Secrets
-    creds_info = st.secrets["gcp_service_account"]
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    # Tự động sửa lỗi nếu private_key bị mất ký tự xuống dòng
+    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+    
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(creds_info, scopes=scope)
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
     client = gspread.authorize(creds)
-    # ID file Sheets của bạn
     return client.open_by_key("1rLautBfQowqcAw9gq2VCfK3UyqUIglnOzZQLqVHhvNs").sheet1
 
 def init_db():
@@ -74,3 +75,4 @@ def toggle_user_status(u, s): pass
 def get_all_users(): 
     sheet = get_sheet()
     return pd.DataFrame(sheet.get_all_records())
+
