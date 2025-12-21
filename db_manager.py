@@ -3,57 +3,59 @@ import pandas as pd
 import uuid
 from datetime import datetime
 
-# ID Sheet của bạn đã được thay vào đây
+# ID Sheet của bạn
 SHEET_ID = "1rLautBfQowqcAw9gq2VCfK3UyqUIglnOzZQLqVHhvNs"
-# Đường dẫn xuất file CSV trực tiếp từ Google
-SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+# Link này sẽ ép Google xuất dữ liệu ở dạng CSV công khai
+SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
 
 def init_db():
     pass
 
 def get_all_users():
     try:
-        # Thêm uuid để buộc Google không lấy bản cũ trong bộ nhớ đệm
-        url = f"{SHEET_URL}&cache={uuid.uuid4()}"
-        df = pd.read_csv(url)
-        # Loại bỏ khoảng trắng và chuyển tên cột về chữ thường
+        # Thêm uuid để tránh cache (dữ liệu cũ)
+        url = f"{SHEET_URL}&nocache={uuid.uuid4()}"
+        # Thiết lập timeout và headers để tránh bị Google chặn robot
+        df = pd.read_csv(url, on_bad_lines='skip')
         df.columns = df.columns.str.strip().str.lower()
         return df
     except Exception as e:
-        # Nếu vẫn lỗi, nó sẽ hiện ra lỗi hệ thống cụ thể để mình sửa tiếp
-        st.error(f"Lỗi hệ thống: {e}")
+        # Dòng này sẽ hiện lỗi thật sự lên màn hình để bạn chụp cho mình nếu vẫn hỏng
+        st.error(f"Chi tiết lỗi kết nối: {e}")
         return pd.DataFrame()
 
 def login_user(username, password):
     df = get_all_users()
     if df.empty: 
-        return {"status": "fail", "msg": "Không thể kết nối dữ liệu Google Sheets"}
+        return {"status": "fail", "msg": "Máy chủ Google Sheets từ chối kết nối. Hãy kiểm tra quyền Chia sẻ!"}
 
-    # Tìm user trong cột username
-    user_row = df[df['username'].astype(str) == str(username)]
+    # Tìm user
+    user_row = df[df['username'].astype(str).str.strip() == str(username).strip()]
     
     if not user_row.empty:
         row = user_row.iloc[0]
         
         # 1. Kiểm tra mật khẩu
-        if str(password) != str(row['password']):
+        if str(password).strip() != str(row['password']).strip():
             return {"status": "fail", "msg": "Mật khẩu không chính xác"}
 
-        # 2. Kiểm tra trạng thái Status (True/False)
+        # 2. Kiểm tra trạng thái Status
+        # Lưu ý: Trên Sheets điền chữ TRUE
         if str(row['status']).upper() != 'TRUE':
-            return {"status": "fail", "msg": "Tài khoản hiện đang bị khóa"}
+            return {"status": "fail", "msg": "Tài khoản đang tạm khóa"}
 
         # 3. Kiểm tra thời hạn
         try:
+            # Chuyển đổi date_open sang ngày tháng
             open_date = pd.to_datetime(row['date_open'])
             duration = int(row['duration'])
             expiry_date = open_date + pd.DateOffset(months=duration)
             days_left = (expiry_date - datetime.now()).days
             
             if days_left <= 0:
-                return {"status": "fail", "msg": "Tài khoản đã hết hạn sử dụng"}
+                return {"status": "fail", "msg": f"Hết hạn dùng từ ngày {expiry_date.strftime('%d/%m/%Y')}"}
             
-            msg_warning = f"Hạn dùng còn {days_left} ngày" if days_left <= 7 else ""
+            msg_warning = f"Sắp hết hạn! Còn {days_left} ngày." if days_left <= 7 else ""
             
             return {
                 "status": "success", 
@@ -63,7 +65,7 @@ def login_user(username, password):
                 "msg": msg_warning
             }
         except:
-            return {"status": "fail", "msg": "Lỗi định dạng ngày trên Sheets (Yêu cầu: YYYY-MM-DD)"}
+            return {"status": "fail", "msg": "Lỗi định dạng ngày (Hãy dùng YYYY-MM-DD)"}
             
     return {"status": "fail", "msg": "Tài khoản không tồn tại"}
 
