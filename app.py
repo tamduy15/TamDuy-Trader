@@ -9,17 +9,12 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import requests
 
-# --- XNOAPI ---
-from xnoapi import client
-from xnoapi.vn.data.stocks import Quote
+# --- XÓA XNOAPI ĐỂ TRÁNH LỖI 403 ---
+# Không import xnoapi nữa
 
 # ---------------------------------------------------------
 # 1. KẾT NỐI API & CẤU HÌNH
 # ---------------------------------------------------------
-MY_API_KEY = "oWwDudF9ak5bhdIGVVNWetbQF26daMXluwItepTIBI1YQj9aWrlMlZui5lOWZ2JalVwVIhBd9LLLjmL1mXR-9ZHJZWgItFOQvihcrJLdtXAcVQzLJCiN0NrOtaYCNZf4"
-try: client(apikey=MY_API_KEY)
-except: pass
-
 st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🦅", initial_sidebar_state="collapsed")
 db.init_db()
 db.create_user("admin", "123456", "Administrator", "admin")
@@ -62,29 +57,44 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. DATA ENGINE
+# 2. DATA ENGINE (TCBS DIRECT API - ỔN ĐỊNH)
 # ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def get_market_data(symbol):
     data = {"df": None, "error": ""}
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
     try:
-        end = datetime.now(); start = end - timedelta(days=1095)
-        q = Quote(symbol)
-        df = q.history(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), interval="1D")
+        # A. PRICE DATA (LẤY TỪ TCBS - KHÔNG QUA TRUNG GIAN)
+        # Lấy 800 nến gần nhất (khoảng 3 năm)
+        price_url = f"https://apipubaws.tcbs.com.vn/stock-insight/v1/stock/bars-long-term?ticker={symbol}&type=stock&resolution=D&countBack=800"
+        res = requests.get(price_url, headers=headers, timeout=10)
         
-        if df is not None and not df.empty:
-            df.columns = df.columns.str.lower()
-            df = df.loc[:, ~df.columns.duplicated()]
-            cols = ['open', 'high', 'low', 'close', 'volume']
-            for c in cols:
-                if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
-            if 'time' in df.columns: df.set_index(pd.to_datetime(df['time']), inplace=True)
-            elif 'date' in df.columns: df.set_index(pd.to_datetime(df['date']), inplace=True)
-            df.sort_index(inplace=True)
-            data["df"] = df
+        if res.status_code == 200:
+            raw = res.json()
+            if 'data' in raw and len(raw['data']) > 0:
+                df = pd.DataFrame(raw['data'])
+                # TCBS trả về: tradingDate, open, high, low, close, volume...
+                df.rename(columns={'tradingDate': 'time'}, inplace=True)
+                df['time'] = pd.to_datetime(df['time'])
+                df.set_index('time', inplace=True)
+                df.sort_index(inplace=True)
+                
+                # Đảm bảo kiểu số
+                cols = ['open', 'high', 'low', 'close', 'volume']
+                for c in cols: df[c] = pd.to_numeric(df[c], errors='coerce')
+                
+                data["df"] = df
+            else:
+                data["error"] = "Không có dữ liệu giá (Mã sai hoặc sàn lỗi)."
+                return data
         else:
-            data["error"] = "No Data"
-    except Exception as e: data["error"] = str(e)
+            data["error"] = f"Lỗi kết nối TCBS (Status: {res.status_code})"
+            return data
+
+    except Exception as e:
+        data["error"] = str(e)
+    
     return data
 
 # ---------------------------------------------------------
@@ -102,9 +112,18 @@ def run_strategy_full(df):
     df['ATR'] = df.ta.atr(length=14)
     
     # ADX & MACD & RSI
-    adx = df.ta.adx(length=14); df['ADX'] = adx['ADX_14']
+    adx = df.ta.adx(length=14)
+    if adx is not None and 'ADX_14' in adx.columns:
+        df['ADX'] = adx['ADX_14']
+    else:
+        df['ADX'] = 0 # Fallback
+
     macd = df.ta.macd(fast=12, slow=26, signal=9)
-    df['MACD'] = macd['MACD_12_26_9']; df['MACD_Signal'] = macd['MACDs_12_26_9']; df['MACD_Hist'] = macd['MACDh_12_26_9']
+    if macd is not None:
+        df['MACD'] = macd['MACD_12_26_9']
+        df['MACD_Signal'] = macd['MACDs_12_26_9']
+        df['MACD_Hist'] = macd['MACDh_12_26_9']
+
     df['RSI'] = df.ta.rsi(length=14)
     
     # ICHIMOKU
@@ -117,28 +136,25 @@ def run_strategy_full(df):
     high_lookup = df['high'].rolling(10).max()
     df['Trailing_Stop'] = high_lookup - (3 * df['ATR'])
     
-    # TREND STATUS (PHÂN LOẠI GIAI ĐOẠN)
-    # Tích cực: Giá > MA50
-    # Tiêu cực: Giá < MA50
-    # Sideway: Giá cắt qua lại MA50 liên tục (đơn giản hóa bằng ADX < 20)
-    
-    conditions = [
-        (df['close'] > df['MA50']), # Positive
-        (df['close'] < df['MA50'])  # Negative
-    ]
+    # TREND PHASE
+    conditions = [(df['close'] > df['MA50']), (df['close'] < df['MA50'])]
     choices = ['POSITIVE', 'NEGATIVE']
     df['Trend_Phase'] = np.select(conditions, choices, default='SIDEWAY')
 
     # SIGNALS
     hhv = df['high'].rolling(20).max().shift(1)
     llv = df['low'].rolling(20).min()
+    # Fix chia cho 0
     base_tight = np.where(llv>0, (hhv-llv)/llv < 0.15, False)
+    
     breakout = (df['close'] > hhv) & (df['volume'] > 1.3 * df['AvgVol']) & (df['close'] > df['MA50']) & base_tight
     
     down_vol_arr = np.where(df['close'] < df['close'].shift(1), df['volume'], 0)
     max_down_10 = pd.Series(down_vol_arr, index=df.index).rolling(10).max().shift(1)
     pocket = (df['volume'] > max_down_10) & (df['close'] > df['MA20']) & (df['close'] > df['close'].shift(1))
     
+    df['Trend'] = np.select([(df['close']>df['MA50'])&(df['MA50']>df['MA200']), (df['close']<df['MA50'])], ['UPTREND', 'DOWNTREND'], default='SIDEWAY')
+
     buy_cond = (breakout | pocket) & (df['close'] > df['MA200'])
     sell_cond = (df['close'] < df['MA20']) & (df['close'].shift(1) >= df['MA20'].shift(1))
     
@@ -182,16 +198,16 @@ def run_backtest_fast(df):
 # ---------------------------------------------------------
 def render_ai_analysis(df, symbol):
     last = df.iloc[-1]
-    adx = last['ADX']; adx_st = "MẠNH" if adx > 25 else "YẾU" if adx < 20 else "HÌNH THÀNH"
+    adx = last.get('ADX', 0); adx_st = "MẠNH" if adx > 25 else "YẾU" if adx < 20 else "HÌNH THÀNH"
     
-    span_a = last['SpanA']; span_b = last['SpanB']
+    span_a = last.get('SpanA', 0); span_b = last.get('SpanB', 0)
     cloud_st = "TRÊN MÂY (TÍCH CỰC)" if last['close'] > max(span_a, span_b) else "DƯỚI MÂY (TIÊU CỰC)" if last['close'] < min(span_a, span_b) else "TRONG MÂY"
     cloud_color = "#00FF00" if "TÍCH CỰC" in cloud_st else "#FF4B4B" if "TIÊU CỰC" in cloud_st else "#FFD700"
     
     sig = last['SIGNAL'] if last['SIGNAL'] else "NẮM GIỮ"
     sig_color = "#00FF00" if "MUA" in sig else "#FF4B4B" if "BÁN" in sig else "#d4af37"
     
-    phase = last['Trend_Phase']
+    phase = last.get('Trend_Phase', 'SIDEWAY')
     phase_text = "TÍCH CỰC (UPTREND)" if phase == 'POSITIVE' else "TIÊU CỰC (DOWNTREND)"
     phase_color = "#00FF00" if phase == 'POSITIVE' else "#FF4B4B"
 
@@ -277,33 +293,20 @@ else:
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(0, 255, 0, 0.1)', line=dict(width=0), showlegend=False), row=1, col=1)
                 
-                # --- TREND-BASED COLORED CANDLES ---
-                # Tách dữ liệu thành 2 phần: POSITIVE (Xanh) và NEGATIVE (Đỏ)
+                # Trend-based Candles
                 df_pos = df[df['Trend_Phase'] == 'POSITIVE']
                 df_neg = df[df['Trend_Phase'] == 'NEGATIVE']
                 
-                # Vẽ nến XANH (Giai đoạn Tích cực)
                 if not df_pos.empty:
-                    fig.add_trace(go.Candlestick(
-                        x=df_pos.index, open=df_pos['open'], high=df_pos['high'], low=df_pos['low'], close=df_pos['close'],
-                        name='Uptrend',
-                        increasing_line_color='#00E676', increasing_fillcolor='#00E676', # Xanh sáng
-                        decreasing_line_color='#006400', decreasing_fillcolor='#006400'  # Xanh đậm
-                    ), row=1, col=1)
+                    fig.add_trace(go.Candlestick(x=df_pos.index, open=df_pos['open'], high=df_pos['high'], low=df_pos['low'], close=df_pos['close'], name='Uptrend', increasing_line_color='#00E676', increasing_fillcolor='#00E676', decreasing_line_color='#006400', decreasing_fillcolor='#006400'), row=1, col=1)
                 
-                # Vẽ nến ĐỎ (Giai đoạn Tiêu cực)
                 if not df_neg.empty:
-                    fig.add_trace(go.Candlestick(
-                        x=df_neg.index, open=df_neg['open'], high=df_neg['high'], low=df_neg['low'], close=df_neg['close'],
-                        name='Downtrend',
-                        increasing_line_color='#B71C1C', increasing_fillcolor='#B71C1C', # Đỏ đậm (Hồi phục trong trend giảm)
-                        decreasing_line_color='#FF1744', decreasing_fillcolor='#FF1744'  # Đỏ tươi
-                    ), row=1, col=1)
+                    fig.add_trace(go.Candlestick(x=df_neg.index, open=df_neg['open'], high=df_neg['high'], low=df_neg['low'], close=df_neg['close'], name='Downtrend', increasing_line_color='#B71C1C', increasing_fillcolor='#B71C1C', decreasing_line_color='#FF1744', decreasing_fillcolor='#FF1744'), row=1, col=1)
 
                 fig.add_trace(go.Scatter(x=df.index, y=df['Trailing_Stop'], line=dict(color='#FF0000', width=2, shape='hv'), name='Trailing Stop'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='#2962FF', width=1.5), name='MA50'), row=1, col=1)
                 
-                # MŨI TÊN MUA/BÁN
+                # Arrows
                 buys = df[df['SIGNAL'] == 'MUA']
                 if not buys.empty: 
                     fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.97, mode='markers', marker=dict(symbol='triangle-up', size=15, color='#00FF00'), name='Buy', showlegend=False), row=1, col=1)
@@ -326,17 +329,12 @@ else:
                 fig.add_hline(y=70, line_dash="dot", line_color="red", row=4, col=1)
                 fig.add_hline(y=30, line_dash="dot", line_color="green", row=4, col=1)
 
-                # AUTO ZOOM 90 DAYS (3 THÁNG)
+                # AUTO ZOOM 90 DAYS
                 end_date = df.index[-1]
-                start_date = end_date - pd.Timedelta(days=250)
-                
+                start_date = end_date - pd.Timedelta(days=90)
                 fig.update_xaxes(range=[start_date, end_date])
                 
-                fig.update_layout(
-                    height=800, paper_bgcolor='#000', plot_bgcolor='#111', 
-                    margin=dict(l=0, r=50, t=30, b=0), showlegend=False, 
-                    xaxis_rangeslider_visible=False, dragmode='pan'
-                )
+                fig.update_layout(height=800, paper_bgcolor='#000', plot_bgcolor='#111', margin=dict(l=0, r=50, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False, dragmode='pan')
                 st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
                 
                 # --- TABS ---
