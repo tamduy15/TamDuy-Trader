@@ -54,7 +54,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. DATA ENGINE (DNSE API - SIÊU TỐC & KHÔNG CHẶN IP)
+# 2. DATA ENGINE (DNSE API)
 # ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def get_market_data(symbol):
@@ -62,51 +62,48 @@ def get_market_data(symbol):
     headers = {'User-Agent': 'Mozilla/5.0'}
     
     try:
-        # Chuẩn bị timestamp (Unix time) cho 3 năm
         end_ts = int(time.time())
-        start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60)) # 3 năm trước
+        start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60))
         
-        # API DNSE (Entrade)
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&from={start_ts}&to={end_ts}&resolution=1D"
         
         res = requests.get(url, headers=headers, timeout=10)
         
         if res.status_code == 200:
             raw = res.json()
-            # DNSE trả về: {'t': [], 'o': [], 'h': [], 'l': [], 'c': [], 'v': []}
             if 't' in raw and len(raw['t']) > 0:
                 df = pd.DataFrame({
-                    'time': pd.to_datetime(raw['t'], unit='s') + pd.Timedelta(hours=7), # UTC -> VN Time
+                    'time': pd.to_datetime(raw['t'], unit='s') + pd.Timedelta(hours=7),
                     'open': raw['o'],
                     'high': raw['h'],
                     'low': raw['l'],
                     'close': raw['c'],
                     'volume': raw['v']
                 })
-                
                 df.set_index('time', inplace=True)
                 df.sort_index(inplace=True)
                 
-                # Chuyển đổi kiểu số cho chắc chắn
                 cols = ['open', 'high', 'low', 'close', 'volume']
                 for c in cols: df[c] = pd.to_numeric(df[c], errors='coerce')
                 
-                # Lọc bỏ các ngày không có giao dịch (Volume = 0)
-                df = df[df['volume'] > 0]
+                # --- AUTO SCALING (QUAN TRỌNG) ---
+                # Nếu giá quá lớn (vd 24000), chia 1000 để về đơn vị K (24.0) cho dễ nhìn nếu cần.
+                # Tuy nhiên, để chính xác nhất, ta cứ giữ nguyên nhưng format hiển thị
                 
+                df = df[df['volume'] > 0]
                 data["df"] = df
             else:
-                data["error"] = f"Mã {symbol} không tồn tại hoặc không có dữ liệu."
+                data["error"] = f"Mã {symbol} không có dữ liệu."
         else:
-            data["error"] = f"Lỗi kết nối DNSE (Status: {res.status_code})"
+            data["error"] = f"Lỗi DNSE: {res.status_code}"
 
     except Exception as e:
-        data["error"] = f"System Error: {str(e)}"
+        data["error"] = str(e)
     
     return data
 
 # ---------------------------------------------------------
-# 3. STRATEGY ENGINE (PURE TECHNICAL)
+# 3. STRATEGY ENGINE
 # ---------------------------------------------------------
 def run_strategy_full(df):
     if len(df) < 50: return df
@@ -119,21 +116,18 @@ def run_strategy_full(df):
     df['AvgVol'] = df.ta.sma(close='volume', length=50)
     df['ATR'] = df.ta.atr(length=14)
     
-    # ADX
+    # ADX, MACD, RSI
     try:
         adx = df.ta.adx(length=14)
-        if adx is not None and 'ADX_14' in adx.columns: df['ADX'] = adx['ADX_14']
-        else: df['ADX'] = 0
+        df['ADX'] = adx['ADX_14'] if adx is not None and 'ADX_14' in adx.columns else 0
     except: df['ADX'] = 0
 
-    # MACD
     macd = df.ta.macd(fast=12, slow=26, signal=9)
     if macd is not None:
         df['MACD'] = macd['MACD_12_26_9']
         df['MACD_Signal'] = macd['MACDs_12_26_9']
         df['MACD_Hist'] = macd['MACDh_12_26_9']
 
-    # RSI
     df['RSI'] = df.ta.rsi(length=14)
     
     # ICHIMOKU
@@ -146,12 +140,12 @@ def run_strategy_full(df):
     high_lookup = df['high'].rolling(10).max()
     df['Trailing_Stop'] = high_lookup - (3 * df['ATR'])
     
-    # TREND PHASE (Màu nến)
+    # TREND PHASE
     conditions = [(df['close'] > df['MA50']), (df['close'] < df['MA50'])]
     choices = ['POSITIVE', 'NEGATIVE']
     df['Trend_Phase'] = np.select(conditions, choices, default='SIDEWAY')
 
-    # SIGNALS (Wyckoff & Pocket Pivot)
+    # SIGNALS
     hhv = df['high'].rolling(20).max().shift(1)
     llv = df['low'].rolling(20).min()
     base_tight = np.where(llv>0, (hhv-llv)/llv < 0.15, False)
@@ -162,8 +156,6 @@ def run_strategy_full(df):
     max_down_10 = pd.Series(down_vol_arr, index=df.index).rolling(10).max().shift(1)
     pocket = (df['volume'] > max_down_10) & (df['close'] > df['MA20']) & (df['close'] > df['close'].shift(1))
     
-    df['Trend'] = np.select([(df['close']>df['MA50'])&(df['MA50']>df['MA200']), (df['close']<df['MA50'])], ['UPTREND', 'DOWNTREND'], default='SIDEWAY')
-
     buy_cond = (breakout | pocket) & (df['close'] > df['MA200'])
     sell_cond = (df['close'] < df['MA20']) & (df['close'].shift(1) >= df['MA20'].shift(1))
     
@@ -203,7 +195,7 @@ def run_backtest_fast(df):
     return ret, win_rate, trades, pd.DataFrame(trade_logs)
 
 # ---------------------------------------------------------
-# 5. AI INSIGHT
+# 5. AI INSIGHT (FIX DECIMAL)
 # ---------------------------------------------------------
 def render_ai_analysis(df, symbol):
     last = df.iloc[-1]
@@ -220,6 +212,7 @@ def render_ai_analysis(df, symbol):
     phase_text = "TÍCH CỰC (UPTREND)" if phase == 'POSITIVE' else "TIÊU CỰC (DOWNTREND)"
     phase_color = "#00FF00" if phase == 'POSITIVE' else "#FF4B4B"
 
+    # --- HTML with Fixed Decimals (.2f) ---
     html = f"""
 <div class='ai-panel'>
 <div class='ai-title'>🤖 PHÂN TÍCH KỸ THUẬT</div>
@@ -234,8 +227,9 @@ def render_ai_analysis(df, symbol):
 • <b>Vol:</b> {(last['volume']/last['AvgVol']):.1f}x TB20.</p>
 <hr style='border-color: #333'>
 <p style='font-size: 15px'><b>TÍN HIỆU: <span style='color:{sig_color}'>{sig}</span></b></p>
-<p><i>Hỗ trợ cứng: {last['MA50']:,.0f}</i><br>
-<i>Trailing Stop: {last['Trailing_Stop']:,.0f}</i></p>
+<p><i>Giá hiện tại: <b>{last['close']:,.2f}</b></i><br>
+<i>Hỗ trợ cứng: {last['MA50']:,.2f}</i><br>
+<i>Trailing Stop: {last['Trailing_Stop']:,.2f}</i></p>
 </div>
 </div>
 """
@@ -276,10 +270,10 @@ else:
             ret_bt, win_bt, trades_bt, logs_bt = run_backtest_fast(df)
             last = df.iloc[-1]
             
-            # --- HUD ---
+            # --- HUD (Fixed Format .2f) ---
             k1, k2, k3, k4, k5 = st.columns(5)
             p_col = "#00FF00" if last['close']>=last['open'] else "#FF0000"
-            k1.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{p_col}'>{last['close']:,.0f}</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
+            k1.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{p_col}'>{last['close']:,.2f}</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
             
             s_txt = last['SIGNAL'] if last['SIGNAL'] else "HOLD"
             s_col = "#00FF00" if "MUA" in s_txt else "#FF0000" if "BÁN" in s_txt else "#888"
@@ -294,7 +288,7 @@ else:
             st.write("")
             col_chart, col_ai = st.columns([3, 1])
             
-            # --- CHART AREA ---
+            # --- CHART ---
             with col_chart:
                 fig = make_subplots(rows=4, cols=1, shared_xaxes=True, row_heights=[0.5, 0.15, 0.15, 0.2], vertical_spacing=0.01, subplot_titles=("Price & Ichimoku", "Volume", "MACD", "RSI"))
                 
@@ -302,25 +296,22 @@ else:
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(0, 255, 0, 0.1)', line=dict(width=0), showlegend=False), row=1, col=1)
                 
-                # Trend-based Candles
+                # Colored Candles
                 df_pos = df[df['Trend_Phase'] == 'POSITIVE']
                 df_neg = df[df['Trend_Phase'] == 'NEGATIVE']
-                
-                if not df_pos.empty:
-                    fig.add_trace(go.Candlestick(x=df_pos.index, open=df_pos['open'], high=df_pos['high'], low=df_pos['low'], close=df_pos['close'], name='Uptrend', increasing_line_color='#00E676', increasing_fillcolor='#00E676', decreasing_line_color='#006400', decreasing_fillcolor='#006400'), row=1, col=1)
-                if not df_neg.empty:
-                    fig.add_trace(go.Candlestick(x=df_neg.index, open=df_neg['open'], high=df_neg['high'], low=df_neg['low'], close=df_neg['close'], name='Downtrend', increasing_line_color='#B71C1C', increasing_fillcolor='#B71C1C', decreasing_line_color='#FF1744', decreasing_fillcolor='#FF1744'), row=1, col=1)
+                if not df_pos.empty: fig.add_trace(go.Candlestick(x=df_pos.index, open=df_pos['open'], high=df_pos['high'], low=df_pos['low'], close=df_pos['close'], name='Uptrend', increasing_line_color='#00E676', increasing_fillcolor='#00E676', decreasing_line_color='#006400', decreasing_fillcolor='#006400'), row=1, col=1)
+                if not df_neg.empty: fig.add_trace(go.Candlestick(x=df_neg.index, open=df_neg['open'], high=df_neg['high'], low=df_neg['low'], close=df_neg['close'], name='Downtrend', increasing_line_color='#B71C1C', increasing_fillcolor='#B71C1C', decreasing_line_color='#FF1744', decreasing_fillcolor='#FF1744'), row=1, col=1)
 
                 fig.add_trace(go.Scatter(x=df.index, y=df['Trailing_Stop'], line=dict(color='#FF0000', width=2, shape='hv'), name='Trailing Stop'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='#2962FF', width=1.5), name='MA50'), row=1, col=1)
                 
-                # Arrows
+                # Arrows (Fixed Tooltip format)
                 buys = df[df['SIGNAL'] == 'MUA']
                 if not buys.empty: 
-                    fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.97, mode='markers', marker=dict(symbol='triangle-up', size=15, color='#00FF00'), name='Buy', showlegend=False), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.97, mode='markers', marker=dict(symbol='triangle-up', size=15, color='#00FF00'), name='Buy', text=[f"BUY {x:,.2f}" for x in buys['close']], hoverinfo='text'), row=1, col=1)
                 sells = df[df['SIGNAL'] == 'BÁN']
                 if not sells.empty: 
-                    fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.03, mode='markers', marker=dict(symbol='triangle-down', size=15, color='#FF0000'), name='Sell', showlegend=False), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.03, mode='markers', marker=dict(symbol='triangle-down', size=15, color='#FF0000'), name='Sell', text=[f"SELL {x:,.2f}" for x in sells['close']], hoverinfo='text'), row=1, col=1)
 
                 # 2. Volume
                 colors_vol = ['#00C853' if c >= o else '#FF3D00' for c, o in zip(df['close'], df['open'])]
@@ -337,9 +328,9 @@ else:
                 fig.add_hline(y=70, line_dash="dot", line_color="red", row=4, col=1)
                 fig.add_hline(y=30, line_dash="dot", line_color="green", row=4, col=1)
 
-                # AUTO ZOOM 90 DAYS
+                # Zoom 90 Days
                 end_date = df.index[-1]
-                start_date = end_date - pd.Timedelta(days=200)
+                start_date = end_date - pd.Timedelta(days=90)
                 fig.update_xaxes(range=[start_date, end_date])
                 
                 fig.update_layout(height=800, paper_bgcolor='#000', plot_bgcolor='#111', margin=dict(l=0, r=50, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False, dragmode='pan')
@@ -349,7 +340,7 @@ else:
                 t1, t2 = st.tabs(["📋 NHẬT KÝ LỆNH", "⚙️ ADMIN"])
                 with t1:
                     if not logs_bt.empty:
-                        st.dataframe(logs_bt.style.format({"Giá Mua": "{:,.0f}", "Giá Bán": "{:,.0f}", "Lãi/Lỗ %": "{:+.2f}"}).applymap(lambda x: 'color: #00FF00' if x > 0 else 'color: #FF0000', subset=['Lãi/Lỗ %']), use_container_width=True)
+                        st.dataframe(logs_bt.style.format({"Giá Mua": "{:,.2f}", "Giá Bán": "{:,.2f}", "Lãi/Lỗ %": "{:+.2f}"}).applymap(lambda x: 'color: #00FF00' if x > 0 else 'color: #FF0000', subset=['Lãi/Lỗ %']), use_container_width=True)
                     else: st.info("Chưa có lệnh.")
                 with t2:
                     if st.session_state.role == "admin":
@@ -368,5 +359,3 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
-
-
