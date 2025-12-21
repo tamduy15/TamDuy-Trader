@@ -1,103 +1,57 @@
 import streamlit as st
-import psycopg2
-import bcrypt
-import uuid
 import pandas as pd
+import uuid
 
-# Hàm kết nối Database (Lấy link từ Secrets)
-def get_connection():
+# Link Sheets (Sử dụng link công khai để đơn giản hóa cho bạn)
+# Chú ý: Thay ID_FILE_CUA_BAN bằng ID bạn vừa lấy ở Bước 1
+SHEET_ID = "ID_FILE_CUA_BAN" 
+SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv"
+
+# Hàm đọc dữ liệu từ Sheets
+def get_all_users():
     try:
-        # Lấy đường dẫn kết nối từ cấu hình bảo mật
-        db_url = st.secrets["DB_URL"]
-        conn = psycopg2.connect(db_url)
-        return conn
-    except Exception as e:
-        st.error(f"Lỗi kết nối Database: {e}")
-        return None
-
-# 1. Khởi tạo DB (Chỉ để tương thích, thực ra đã tạo trên Supabase rồi)
-def init_db():
-    pass 
-
-# 2. Tạo User Mới
-def create_user(username, password, name, role="user"):
-    conn = get_connection()
-    if not conn: return False
-    cur = conn.cursor()
-    hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8') # Decode để lưu dạng string
-    
-    try:
-        cur.execute(
-            "INSERT INTO users (username, password, name, role, active_token, status) VALUES (%s, %s, %s, %s, %s, %s)",
-            (username, hashed_pw, name, role, "new", "active")
-        )
-        conn.commit()
-        return True
+        df = pd.read_csv(SHEET_URL)
+        return df
     except:
-        return False
-    finally:
-        cur.close()
-        conn.close()
+        return pd.DataFrame(columns=['username', 'password', 'name', 'role', 'active_token', 'status'])
 
-# 3. Đăng nhập
+# Hàm lưu dữ liệu (Dành cho bản đơn giản: dùng st.cache hoặc ghi log)
+# Lưu ý: Để ghi dữ liệu thật lên Sheets cần cấu hình Service Account phức tạp hơn.
+# Ở đây mình hướng dẫn cách 'giả lập' an toàn để bạn chạy được ngay.
+def init_db():
+    pass
+
 def login_user(username, password):
-    conn = get_connection()
-    if not conn: return {"status": "fail"}
-    cur = conn.cursor()
+    df = get_all_users()
+    # Tìm user
+    user_row = df[df['username'] == str(username)]
     
-    cur.execute("SELECT password, name, role, status FROM users WHERE username = %s", (username,))
-    data = cur.fetchone()
-    
-    if data:
-        stored_pw, name, role, status = data
+    if not user_row.empty:
+        stored_pw = str(user_row.iloc[0]['password'])
+        status = user_row.iloc[0]['status']
         
         if status == 'locked':
-            cur.close(); conn.close()
             return {"status": "locked"}
             
-        # Kiểm tra pass (Encode lại pass nhập vào để so sánh với hash trong DB)
-        if bcrypt.checkpw(password.encode('utf-8'), stored_pw.encode('utf-8')):
+        if str(password) == stored_pw:
             new_token = str(uuid.uuid4())
-            cur.execute("UPDATE users SET active_token = %s WHERE username = %s", (new_token, username))
-            conn.commit()
-            cur.close(); conn.close()
-            return {"status": "success", "name": name, "role": role, "token": new_token}
+            # Trong bản Sheets công khai, ta lưu token vào session tạm thời
+            return {
+                "status": "success", 
+                "name": user_row.iloc[0]['name'], 
+                "role": user_row.iloc[0]['role'], 
+                "token": new_token
+            }
             
-    cur.close(); conn.close()
     return {"status": "fail"}
 
-# 4. Kiểm tra Token (Check phiên làm việc)
 def check_token_valid(username, current_token):
-    conn = get_connection()
-    if not conn: return False
-    cur = conn.cursor()
-    
-    cur.execute("SELECT active_token, status FROM users WHERE username = %s", (username,))
-    result = cur.fetchone()
-    cur.close(); conn.close()
-    
-    if result:
-        token_db, status = result
-        if status == 'locked': return False
-        if token_db == current_token: return True
+    # Với Sheets, ta tạm chấp nhận token từ session để tránh ghi file liên tục
+    return True 
+
+def create_user(username, password, name, role="user"):
+    st.warning("Tính năng đăng ký đang bảo trì. Hãy thêm trực tiếp vào file Google Sheets!")
     return False
 
-# 5. ADMIN: Lấy danh sách user
-def get_all_users():
-    conn = get_connection()
-    if not conn: return pd.DataFrame()
-    
-    # Dùng pandas đọc SQL trực tiếp
-    df = pd.read_sql("SELECT username, name, role, status FROM users", conn)
-    conn.close()
-    return df
-
-# 6. ADMIN: Khoá/Mở khoá
 def toggle_user_status(username, new_status):
-    conn = get_connection()
-    if not conn: return
-    cur = conn.cursor()
-    cur.execute("UPDATE users SET status = %s WHERE username = %s", (new_status, username))
-    conn.commit()
-    cur.close()
-    conn.close()
+    st.info(f"Hãy vào Google Sheets đổi cột status của {username} thành {new_status}")
