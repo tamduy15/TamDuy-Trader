@@ -274,7 +274,10 @@ else:
             
             # --- HUD & PERFORMANCE METRICS ---
             k1, k2, k3, k4, k5 = st.columns(5)
-            k1.markdown(f"<div class='hud-box'><div class='hud-val'>{last['close']:,.2f}</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
+            # LOGIC: Hôm nay tăng thì xanh, giảm thì đỏ cho "Giá hiện tại"
+            p_color = "#00E676" if last['close'] >= last['open'] else "#FF5252"
+            k1.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{p_color}'>{last['close']:,.2f}</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
+            
             s_col = "#00E676" if "MUA" in last['SIGNAL'] else "#FF5252" if "BÁN" in last['SIGNAL'] else "#888"
             k2.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{s_col}'>{last['SIGNAL'] if last['SIGNAL'] else 'HOLD'}</div><div class='hud-lbl'>TÍN HIỆU</div></div>", unsafe_allow_html=True)
             k3.markdown(f"<div class='hud-box'><div class='hud-val' style='color:#FF5252'>{last['SL']:,.1f}</div><div class='hud-lbl'>STOP LOSS</div></div>", unsafe_allow_html=True)
