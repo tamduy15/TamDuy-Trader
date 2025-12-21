@@ -16,7 +16,7 @@ st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="�
 db.init_db()
 db.create_user("admin", "123456", "Administrator", "admin")
 
-# --- CSS: PRO TRADING TERMINAL ---
+# --- CSS: PRO TRADING TERMINAL (CLEAN MODE) ---
 st.markdown("""
 <style>
     .stApp {background-color: #000000; color: #e0e0e0;}
@@ -24,6 +24,23 @@ st.markdown("""
     
     h1, h2, h3 {color: #d4af37 !important; font-family: 'Segoe UI', sans-serif;}
     
+    /* --- ẨN THANH HEADER CỦA STREAMLIT --- */
+    header[data-testid="stHeader"] {
+        visibility: hidden;
+        height: 0px;
+    }
+    
+    /* Ẩn luôn nút 3 gạch và nút Deploy nếu còn sót */
+    .stDeployButton {display:none;}
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    /* Đẩy nội dung lên sát mép trên */
+    .block-container {
+        padding-top: 0rem !important; 
+        padding-bottom: 0rem !important;
+    }
+
     /* HUD Box */
     .hud-box {
         background-color: #0d1117; border: 1px solid #333;
@@ -86,10 +103,6 @@ def get_market_data(symbol):
                 cols = ['open', 'high', 'low', 'close', 'volume']
                 for c in cols: df[c] = pd.to_numeric(df[c], errors='coerce')
                 
-                # --- AUTO SCALING (QUAN TRỌNG) ---
-                # Nếu giá quá lớn (vd 24000), chia 1000 để về đơn vị K (24.0) cho dễ nhìn nếu cần.
-                # Tuy nhiên, để chính xác nhất, ta cứ giữ nguyên nhưng format hiển thị
-                
                 df = df[df['volume'] > 0]
                 data["df"] = df
             else:
@@ -116,7 +129,6 @@ def run_strategy_full(df):
     df['AvgVol'] = df.ta.sma(close='volume', length=50)
     df['ATR'] = df.ta.atr(length=14)
     
-    # ADX, MACD, RSI
     try:
         adx = df.ta.adx(length=14)
         df['ADX'] = adx['ADX_14'] if adx is not None and 'ADX_14' in adx.columns else 0
@@ -195,7 +207,7 @@ def run_backtest_fast(df):
     return ret, win_rate, trades, pd.DataFrame(trade_logs)
 
 # ---------------------------------------------------------
-# 5. AI INSIGHT (FIX DECIMAL)
+# 5. AI INSIGHT
 # ---------------------------------------------------------
 def render_ai_analysis(df, symbol):
     last = df.iloc[-1]
@@ -212,7 +224,6 @@ def render_ai_analysis(df, symbol):
     phase_text = "TÍCH CỰC (UPTREND)" if phase == 'POSITIVE' else "TIÊU CỰC (DOWNTREND)"
     phase_color = "#00FF00" if phase == 'POSITIVE' else "#FF4B4B"
 
-    # --- HTML with Fixed Decimals (.2f) ---
     html = f"""
 <div class='ai-panel'>
 <div class='ai-title'>🤖 PHÂN TÍCH KỸ THUẬT</div>
@@ -270,7 +281,7 @@ else:
             ret_bt, win_bt, trades_bt, logs_bt = run_backtest_fast(df)
             last = df.iloc[-1]
             
-            # --- HUD (Fixed Format .2f) ---
+            # --- HUD ---
             k1, k2, k3, k4, k5 = st.columns(5)
             p_col = "#00FF00" if last['close']>=last['open'] else "#FF0000"
             k1.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{p_col}'>{last['close']:,.2f}</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
@@ -296,7 +307,6 @@ else:
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(0, 255, 0, 0.1)', line=dict(width=0), showlegend=False), row=1, col=1)
                 
-                # Colored Candles
                 df_pos = df[df['Trend_Phase'] == 'POSITIVE']
                 df_neg = df[df['Trend_Phase'] == 'NEGATIVE']
                 if not df_pos.empty: fig.add_trace(go.Candlestick(x=df_pos.index, open=df_pos['open'], high=df_pos['high'], low=df_pos['low'], close=df_pos['close'], name='Uptrend', increasing_line_color='#00E676', increasing_fillcolor='#00E676', decreasing_line_color='#006400', decreasing_fillcolor='#006400'), row=1, col=1)
@@ -305,7 +315,6 @@ else:
                 fig.add_trace(go.Scatter(x=df.index, y=df['Trailing_Stop'], line=dict(color='#FF0000', width=2, shape='hv'), name='Trailing Stop'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='#2962FF', width=1.5), name='MA50'), row=1, col=1)
                 
-                # Arrows (Fixed Tooltip format)
                 buys = df[df['SIGNAL'] == 'MUA']
                 if not buys.empty: 
                     fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.97, mode='markers', marker=dict(symbol='triangle-up', size=15, color='#00FF00'), name='Buy', text=[f"BUY {x:,.2f}" for x in buys['close']], hoverinfo='text'), row=1, col=1)
@@ -330,7 +339,7 @@ else:
 
                 # Zoom 90 Days
                 end_date = df.index[-1]
-                start_date = end_date - pd.Timedelta(days=200)
+                start_date = end_date - pd.Timedelta(days=90)
                 fig.update_xaxes(range=[start_date, end_date])
                 
                 fig.update_layout(height=800, paper_bgcolor='#000', plot_bgcolor='#111', margin=dict(l=0, r=50, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False, dragmode='pan')
@@ -359,4 +368,3 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
-
