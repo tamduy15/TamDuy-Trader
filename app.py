@@ -339,7 +339,7 @@ else:
 
                 # AUTO ZOOM 90 DAYS
                 end_date = df.index[-1]
-                start_date = end_date - pd.Timedelta(days=350)
+                start_date = end_date - pd.Timedelta(days=200)
                 fig.update_xaxes(range=[start_date, end_date])
                 
                 fig.update_layout(height=800, paper_bgcolor='#000', plot_bgcolor='#111', margin=dict(l=0, r=50, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False, dragmode='pan')
@@ -368,4 +368,5 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
