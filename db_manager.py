@@ -27,45 +27,34 @@ def get_all_users():
 def login_user(username, password):
     df = get_all_users()
     if df.empty: 
-        return {"status": "fail", "msg": "Máy chủ Google Sheets từ chối kết nối. Hãy kiểm tra quyền Chia sẻ!"}
+        return {"status": "fail", "msg": "Lỗi kết nối dữ liệu"}
 
-    # Tìm user
     user_row = df[df['username'].astype(str).str.strip() == str(username).strip()]
     
     if not user_row.empty:
         row = user_row.iloc[0]
-        
-        # 1. Kiểm tra mật khẩu
         if str(password).strip() != str(row['password']).strip():
             return {"status": "fail", "msg": "Mật khẩu không chính xác"}
 
-        # 2. Kiểm tra trạng thái Status
-        # Lưu ý: Trên Sheets điền chữ TRUE
-        if str(row['status']).upper() != 'TRUE':
-            return {"status": "fail", "msg": "Tài khoản đang tạm khóa"}
-
-        # 3. Kiểm tra thời hạn
         try:
-            # Chuyển đổi date_open sang ngày tháng
             open_date = pd.to_datetime(row['date_open'])
             duration = int(row['duration'])
             expiry_date = open_date + pd.DateOffset(months=duration)
             days_left = (expiry_date - datetime.now()).days
             
             if days_left <= 0:
-                return {"status": "fail", "msg": f"Hết hạn dùng từ ngày {expiry_date.strftime('%d/%m/%Y')}"}
-            
-            msg_warning = f"Sắp hết hạn! Còn {days_left} ngày." if days_left <= 7 else ""
+                return {"status": "fail", "msg": "Tài khoản đã hết hạn!"}
             
             return {
                 "status": "success", 
                 "name": row['name'], 
                 "role": row['role'], 
                 "token": str(uuid.uuid4()),
-                "msg": msg_warning
+                "days_left": days_left,
+                "expiry_date": expiry_date.strftime('%d/%m/%Y')
             }
         except:
-            return {"status": "fail", "msg": "Lỗi định dạng ngày (Hãy dùng YYYY-MM-DD)"}
+            return {"status": "fail", "msg": "Lỗi định dạng ngày trên Sheets"}
             
     return {"status": "fail", "msg": "Tài khoản không tồn tại"}
 
@@ -74,3 +63,4 @@ def check_token_valid(username, current_token):
 
 def create_user(u, p, n, r): pass
 def toggle_user_status(u, s): pass
+
