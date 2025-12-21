@@ -15,11 +15,11 @@ import requests
 st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🦅", initial_sidebar_state="collapsed")
 db.init_db()
 
-# --- CSS: PRO TRADING TERMINAL (DARK MODE) ---
+# --- CSS: PRO TRADING TERMINAL (TRADINGVIEW DARK STYLE) ---
 st.markdown("""
 <style>
     .stApp {background-color: #000000; color: #e0e0e0;}
-    @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap');
     
     h1, h2, h3 {color: #d4af37 !important; font-family: 'Segoe UI', sans-serif;}
     
@@ -43,7 +43,7 @@ st.markdown("""
         padding: 8px; border-radius: 4px; text-align: center;
         margin-bottom: 5px;
     }
-    .perf-val {font-family: 'Roboto Mono', monospace; font-size: 16px; font-weight: bold; color: #d4af37;}
+    .perf-val {font-family: 'Roboto Mono', monospace; font-size: 16px; font-weight: bold;}
     .perf-lbl {font-size: 9px; color: #aaa; text-transform: uppercase;}
 
     .ai-panel {
@@ -281,32 +281,37 @@ else:
             k4.markdown(f"<div class='hud-box'><div class='hud-val' style='color:#00FF00'>{last['T1']:,.1f}</div><div class='hud-lbl'>TARGET 1</div></div>", unsafe_allow_html=True)
             k5.markdown(f"<div class='hud-box'><div class='hud-val' style='color:#00E5FF'>{last['T2']:,.1f}</div><div class='hud-lbl'>TARGET 2</div></div>", unsafe_allow_html=True)
 
+            # Thống kê hiệu suất chiến lược ngay dưới HUD
             p1, p2, p3, p4 = st.columns(4)
-            p1.markdown(f"<div class='perf-box'><div class='perf-val'>{trades_bt}</div><div class='perf-lbl'>TỔNG SỐ LỆNH</div></div>", unsafe_allow_html=True)
-            p2.markdown(f"<div class='perf-box'><div class='perf-val'>{win_bt:.1f}%</div><div class='perf-lbl'>TỶ LỆ THẮNG</div></div>", unsafe_allow_html=True)
-            p3.markdown(f"<div class='perf-box'><div class='perf-val'>{ret_bt:+.2f}%</div><div class='perf-lbl'>LỢI NHUẬN KỲ VỌNG</div></div>", unsafe_allow_html=True)
-            p4.markdown(f"<div class='perf-box'><div class='perf-val'>{duration_days} NGÀY</div><div class='perf-lbl'>THỜI GIAN THEO DÕI</div></div>", unsafe_allow_html=True)
+            p1.markdown(f"<div class='perf-box'><div class='perf-val' style='color: #d4af37'>{trades_bt}</div><div class='perf-lbl'>TỔNG SỐ LỆNH</div></div>", unsafe_allow_html=True)
+            p2.markdown(f"<div class='perf-box'><div class='perf-val' style='color: #d4af37'>{win_bt:.1f}%</div><div class='perf-lbl'>TỶ LỆ THẮNG</div></div>", unsafe_allow_html=True)
+            
+            # Đổi màu Lợi nhuận kỳ vọng theo giá trị âm dương
+            ret_color = "#BB86FC" if ret_bt > 0 else "#FF5252"
+            p3.markdown(f"<div class='perf-box'><div class='perf-val' style='color: {ret_color}'>{ret_bt:+.2f}%</div><div class='perf-lbl'>LỢI NHUẬN KỲ VỌNG</div></div>", unsafe_allow_html=True)
+            p4.markdown(f"<div class='perf-box'><div class='perf-val' style='color: #d4af37'>{duration_days} NGÀY</div><div class='perf-lbl'>THỜI GIAN THEO DÕI</div></div>", unsafe_allow_html=True)
 
             st.write("")
             col_chart, col_ai = st.columns([3, 1])
             
             # --- CHART ---
             with col_chart:
-                fig = make_subplots(rows=4, cols=1, shared_xaxes=True, row_heights=[0.5, 0.15, 0.15, 0.2], vertical_spacing=0.01)
+                fig = make_subplots(rows=4, cols=1, shared_xaxes=True, row_heights=[0.5, 0.15, 0.15, 0.2], vertical_spacing=0.015)
                 
-                # Ichimoku Cloud
+                # Ichimoku Cloud (Mờ ảo như TV)
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(0, 255, 0, 0.05)', line=dict(width=0), showlegend=False), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(41, 98, 255, 0.08)', line=dict(width=0), showlegend=False), row=1, col=1)
                 
                 # Candlestick Groups
                 df_pos = df[df['Trend_Phase'] == 'POSITIVE']
                 df_neg = df[df['Trend_Phase'] == 'NEGATIVE']
                 df_sdw = df[df['Trend_Phase'] == 'SIDEWAY']
 
+                # NẾN NHẬT CHUẨN (TRADINGVIEW STYLE): Thân nến đặc, màu sắc xu hướng
                 for trend_df, color_up, color_down, name in [
-                    (df_pos, '#00E676', '#00E676', 'Positive'),
-                    (df_neg, '#FF1744', '#FF1744', 'Negative'),
-                    (df_sdw, '#FFD600', '#FFD600', 'Sideway')
+                    (df_pos, '#089981', '#089981', 'Positive'),
+                    (df_neg, '#f23645', '#f23645', 'Negative'),
+                    (df_sdw, '#f0b90b', '#f0b90b', 'Sideway')
                 ]:
                     if not trend_df.empty:
                         fig.add_trace(go.Candlestick(
@@ -315,54 +320,66 @@ else:
                             name=name,
                             increasing_line_color=color_up, increasing_fillcolor=color_up,
                             decreasing_line_color=color_down, decreasing_fillcolor=color_down,
-                            whiskerwidth=0.9
+                            whiskerwidth=0.8,
+                            line_width=1.5
                         ), row=1, col=1)
 
-                fig.add_hline(y=last['SL'], line_dash="dash", line_color="#FF4B4B", annotation_text="SL", row=1, col=1)
-                fig.add_hline(y=last['T1'], line_dash="dash", line_color="#00FF00", annotation_text="T1", row=1, col=1)
-                fig.add_hline(y=last['T2'], line_dash="dash", line_color="#00E5FF", annotation_text="T2", row=1, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='#2962FF', width=1.5), name='MA50'), row=1, col=1)
+                # SL/Target Lines (TradingView Style)
+                fig.add_hline(y=last['SL'], line_dash="dash", line_color="#f23645", annotation_text="STOP LOSS", annotation_position="bottom right", row=1, col=1)
+                fig.add_hline(y=last['T1'], line_dash="dash", line_color="#089981", annotation_text="TARGET 1", annotation_position="top right", row=1, col=1)
+                fig.add_hline(y=last['T2'], line_dash="dash", line_color="#00E5FF", annotation_text="TARGET 2", annotation_position="top right", row=1, col=1)
+
+                fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='rgba(41, 98, 255, 0.8)', width=1.8), name='MA50'), row=1, col=1)
                 
+                # Signal markers (TradingView Symbols)
                 buys = df[df['SIGNAL'] == 'MUA']
-                if not buys.empty: fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.98, mode='markers', marker=dict(symbol='triangle-up', size=16, color='#00FF00', line=dict(width=1.5, color='white')), name='BUY Signal'), row=1, col=1)
+                if not buys.empty: fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.985, mode='markers', marker=dict(symbol='triangle-up', size=16, color='#089981', line=dict(width=1, color='#ffffff')), name='BUY Signal'), row=1, col=1)
                 sells = df[df['SIGNAL'] == 'BÁN']
-                if not sells.empty: fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.02, mode='markers', marker=dict(symbol='triangle-down', size=16, color='#FF1744', line=dict(width=1.5, color='white')), name='SELL Signal'), row=1, col=1)
+                if not sells.empty: fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.015, mode='markers', marker=dict(symbol='triangle-down', size=16, color='#f23645', line=dict(width=1, color='#ffffff')), name='SELL Signal'), row=1, col=1)
 
-                fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=['#00C853' if c >= o else '#FF3D00' for c, o in zip(df['close'], df['open'])], name='Volume'), row=2, col=1)
-                fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=['#00C853' if h > 0 else '#FF3D00' for h in df['MACD_Hist']]), row=3, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#AA00FF')), row=4, col=1)
+                # Indicators
+                fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=['#1b5e20' if c >= o else '#b71c1c' for c, o in zip(df['close'], df['open'])], name='Volume', opacity=0.8), row=2, col=1)
+                fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=['#089981' if h > 0 else '#f23645' for h in df['MACD_Hist']], opacity=0.8), row=3, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#7e57c2', width=1.5)), row=4, col=1)
 
-                # CẤU HÌNH TRỤC VÀ ZOOM
-                # Chuyển trục tung sang phải và tắt đường lưới trắng gây rối
+                # CẤU HÌNH TRỤC VÀ ZOOM (TRADINGVIEW UI)
                 for r in range(1, 5):
-                    fig.update_yaxes(side="right", showgrid=True, gridcolor='#1f1f1f', zeroline=False, row=r, col=1)
-                    fig.update_xaxes(showgrid=False, zeroline=False, row=r, col=1)
+                    fig.update_yaxes(side="right", showgrid=True, gridcolor='rgba(255, 255, 255, 0.05)', zeroline=False, row=r, col=1, tickfont=dict(color='#888', family='Roboto Mono'))
+                    fig.update_xaxes(showgrid=False, zeroline=False, row=r, col=1, tickfont=dict(color='#888'))
 
-                # ZOOM CHUẨN: 90 ngày (~3 tháng) - Đảm bảo áp dụng cho trục X dùng chung
-                if len(df) > 200:
-                    start_date = df.index[-200]
-                    end_date = df.index[-1]
-                    fig.update_xaxes(range=[start_date, end_date])
+                # ZOOM CHUẨN: 90 ngày (~3 tháng) - Đảm bảo thân nến mập mạp
+                if len(df) > 90:
+                    start_date = df.index[-90]
+                    end_date = df.index[-1] + timedelta(days=5) # Thêm khoảng trống bên phải
+                    fig.update_xaxes(range=[start_date, end_date], row=1, col=1)
 
                 fig.update_layout(
                     height=850, 
                     paper_bgcolor='#000', 
-                    plot_bgcolor='#080808', 
+                    plot_bgcolor='#000', 
                     margin=dict(l=0, r=60, t=30, b=0), 
                     showlegend=False, 
-                    xaxis_rangeslider_visible=False, # Tắt thanh trượt màu trắng dưới nến
-                    hovermode='x unified'
+                    xaxis_rangeslider_visible=False,
+                    hovermode='x unified',
+                    hoverlabel=dict(bgcolor="#161b22", font_size=12, font_family="Roboto Mono")
                 )
                 
                 st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': False})
                 
+                # --- TABS: LOGS ---
                 t1, t2 = st.tabs(["📋 NHẬT KÝ LỆNH", "⚙️ QUẢN TRỊ"])
+                
                 with t1:
                     if not logs_bt.empty:
                         def style_pnl(val):
                             color = '#1b5e20' if val > 0 else '#b71c1c'
                             return f'background-color: {color}; color: white; font-weight: bold; border: 1px solid #333;'
-                        st.dataframe(logs_bt.style.applymap(style_pnl, subset=['Lãi/Lỗ %']).format({"Giá Mua": "{:,.2f}", "Giá Bán": "{:,.2f}", "Lãi/Lỗ %": "{:+.2f}%"}), use_container_width=True)
+                        
+                        st.dataframe(
+                            logs_bt.style.applymap(style_pnl, subset=['Lãi/Lỗ %'])
+                            .format({"Giá Mua": "{:,.2f}", "Giá Bán": "{:,.2f}", "Lãi/Lỗ %": "{:+.2f}%"}), 
+                            use_container_width=True
+                        )
                     else: st.info("Hệ thống chưa ghi nhận lệnh thực tế.")
                 
                 with t2:
@@ -373,4 +390,3 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
-
