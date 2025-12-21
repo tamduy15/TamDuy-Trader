@@ -4,5 +4,3 @@ numpy
 pandas_ta
 plotly
 requests
-bcrypt
-psycopg2-binary
