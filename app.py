@@ -266,7 +266,6 @@ if not st.session_state.logged_in:
         with st.form("login_form"):
             u = st.text_input("Username")
             p = st.text_input("Password", type="password")
-            
             if st.form_submit_button("LOGIN TERMINAL", use_container_width=True):
                 res = db.login_user(u, p)
                 if res["status"] == "success":
@@ -277,14 +276,11 @@ if not st.session_state.logged_in:
                         role=res["role"], 
                         token=res["token"]
                     )
-                    # Thông báo thời hạn sử dụng nếu có
                     if res.get("msg"):
                         st.toast(res["msg"], icon="⚠️")
-                        time.sleep(1.5)
                     st.rerun()
                 else:
-                    # Báo lỗi: Sai pass, hết hạn, hoặc bị khóa
-                    st.error(res.get("msg", "Đăng nhập thất bại"))
+                    st.error(res.get("msg", "Lỗi đăng nhập"))
 
 # 3. GIAO DIỆN ĐÃ ĐĂNG NHẬP THÀNH CÔNG
 else:
@@ -399,6 +395,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
