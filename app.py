@@ -121,7 +121,7 @@ def run_strategy_full(df):
     df['SpanA'] = ((df['Tenkan'] + df['Kijun']) / 2).shift(26)
     h52 = df['high'].rolling(52).max(); l52 = df['low'].rolling(52).min(); df['SpanB'] = ((h52 + l52) / 2).shift(26)
     
-    # TREND PHASE
+    # TREND PHASE: NGUYÊN TẮC CŨ (GIÁ VS MA50)
     conditions = [(df['close'] > df['MA50']), (df['close'] < df['MA50'])]
     choices = ['POSITIVE', 'NEGATIVE']
     df['Trend_Phase'] = np.select(conditions, choices, default='SIDEWAY')
@@ -131,14 +131,11 @@ def run_strategy_full(df):
     llv_20 = df['low'].rolling(20).min().shift(1)
     
     # Tính toán Stoploss/Target động
-    # Stoploss = Max(MA50, Kijun) hoặc Price - 1.5 * ATR
     df['SL'] = np.where(df['close'] > df['MA50'], 
                         np.maximum(df['MA50'], df['Kijun']) - (0.5 * df['ATR']), 
                         df['close'] - (2 * df['ATR']))
     
-    # Target 1: Tỷ lệ R:R = 1:1.5
     df['T1'] = df['close'] + 1.5 * (df['close'] - df['SL']).abs()
-    # Target 2: Tỷ lệ R:R = 1:3 hoặc Kháng cự 20 phiên
     df['T2'] = df['close'] + 3.0 * (df['close'] - df['SL']).abs()
 
     # Tín hiệu Pocket Pivot / Breakout
@@ -202,7 +199,6 @@ def render_ai_analysis(df, symbol):
     phase_text = "TÍCH CỰC (UPTREND)" if phase == 'POSITIVE' else "TIÊU CỰC (DOWNTREND)"
     phase_color = "#00FF00" if phase == 'POSITIVE' else "#FF4B4B"
     
-    # Đánh giá rủi ro
     rr_ratio = (last['T1'] - last['close']) / (last['close'] - last['SL']) if (last['close'] - last['SL']) != 0 else 0
     rr_st = "HẤP DẪN" if rr_ratio >= 1.5 else "KÉM"
 
@@ -262,7 +258,6 @@ if not st.session_state.logged_in:
                     st.toast(f"Chào {res['name']}!", icon="🚀"); time.sleep(1); st.rerun()
                 else: st.error(res.get("msg", "Đăng nhập thất bại"))
 else:
-    # Header & Nav
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
     with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
     with c_input: symbol = st.text_input("MÃ CK", "", label_visibility="collapsed", placeholder="Nhập mã...").upper()
@@ -301,10 +296,36 @@ else:
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(0, 255, 0, 0.05)', line=dict(width=0), showlegend=False), row=1, col=1)
                 
-                # Candlestick
-                fig.add_trace(go.Candlestick(x=df.index, open=df['open'], high=df['high'], low=df['low'], close=df['close'], name='Price'), row=1, col=1)
+                # --- PHÂN LOẠI NẾN THEO TREND PHASE (NGUYÊN TẮC CŨ) ---
+                df_pos = df[df['Trend_Phase'] == 'POSITIVE']
+                df_neg = df[df['Trend_Phase'] == 'NEGATIVE']
+                df_sdw = df[df['Trend_Phase'] == 'SIDEWAY']
+
+                # Nến Xanh (Positive): Ưu tiên Hold/Mua thêm
+                if not df_pos.empty:
+                    fig.add_trace(go.Candlestick(
+                        x=df_pos.index, open=df_pos['open'], high=df_pos['high'], low=df_pos['low'], close=df_pos['close'],
+                        name='Positive', increasing_line_color='#00E676', increasing_fillcolor='#00E676',
+                        decreasing_line_color='#00C853', decreasing_fillcolor='#00C853'
+                    ), row=1, col=1)
+
+                # Nến Đỏ (Negative): Tiêu cực, nên bán sớm
+                if not df_neg.empty:
+                    fig.add_trace(go.Candlestick(
+                        x=df_neg.index, open=df_neg['open'], high=df_neg['high'], low=df_neg['low'], close=df_neg['close'],
+                        name='Negative', increasing_line_color='#FF1744', increasing_fillcolor='#FF1744',
+                        decreasing_line_color='#D50000', decreasing_fillcolor='#D50000'
+                    ), row=1, col=1)
                 
-                # Vẽ SL và Target tại điểm cuối
+                # Nến Vàng (Sideway): Thăm dò
+                if not df_sdw.empty:
+                    fig.add_trace(go.Candlestick(
+                        x=df_sdw.index, open=df_sdw['open'], high=df_sdw['high'], low=df_sdw['low'], close=df_sdw['close'],
+                        name='Sideway', increasing_line_color='#FFD600', increasing_fillcolor='#FFD600',
+                        decreasing_line_color='#FFAB00', decreasing_fillcolor='#FFAB00'
+                    ), row=1, col=1)
+
+                # Vẽ SL và Target
                 fig.add_hline(y=last['SL'], line_dash="dash", line_color="#FF4B4B", annotation_text="SL", row=1, col=1)
                 fig.add_hline(y=last['T1'], line_dash="dash", line_color="#00FF00", annotation_text="T1", row=1, col=1)
                 fig.add_hline(y=last['T2'], line_dash="dash", line_color="#00E5FF", annotation_text="T2", row=1, col=1)
@@ -314,9 +335,9 @@ else:
                 
                 # Signals markers
                 buys = df[df['SIGNAL'] == 'MUA']
-                if not buys.empty: fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.98, mode='markers', marker=dict(symbol='triangle-up', size=12, color='#00FF00'), name='Buy'), row=1, col=1)
+                if not buys.empty: fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.98, mode='markers', marker=dict(symbol='triangle-up', size=12, color='#FFFFFF'), name='Buy Signature'), row=1, col=1)
                 sells = df[df['SIGNAL'] == 'BÁN']
-                if not sells.empty: fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.02, mode='markers', marker=dict(symbol='triangle-down', size=12, color='#FF4B4B'), name='Sell'), row=1, col=1)
+                if not sells.empty: fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.02, mode='markers', marker=dict(symbol='triangle-down', size=12, color='#FFFFFF'), name='Sell Signature'), row=1, col=1)
 
                 # Volume, MACD, RSI
                 colors_vol = ['#00C853' if c >= o else '#FF3D00' for c, o in zip(df['close'], df['open'])]
