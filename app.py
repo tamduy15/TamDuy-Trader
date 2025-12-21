@@ -54,59 +54,62 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. DATA ENGINE (VNDIRECT API - ỔN ĐỊNH)
+# 2. DATA ENGINE (DNSE API - SIÊU TỐC & KHÔNG CHẶN IP)
 # ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def get_market_data(symbol):
     data = {"df": None, "error": ""}
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     try:
-        # A. PRICE DATA (VNDIRECT FINFO)
-        # Lấy khoảng 2000 nến ngày (đủ cho vài năm)
-        url = f"https://finfo-api.vndirect.com.vn/v4/stock_prices?sort=date&q=code:{symbol}&size=2000"
+        # Chuẩn bị timestamp (Unix time) cho 3 năm
+        end_ts = int(time.time())
+        start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60)) # 3 năm trước
+        
+        # API DNSE (Entrade)
+        url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&from={start_ts}&to={end_ts}&resolution=1D"
+        
         res = requests.get(url, headers=headers, timeout=10)
         
         if res.status_code == 200:
-            raw_data = res.json()
-            if 'data' in raw_data and len(raw_data['data']) > 0:
-                df = pd.DataFrame(raw_data['data'])
+            raw = res.json()
+            # DNSE trả về: {'t': [], 'o': [], 'h': [], 'l': [], 'c': [], 'v': []}
+            if 't' in raw and len(raw['t']) > 0:
+                df = pd.DataFrame({
+                    'time': pd.to_datetime(raw['t'], unit='s') + pd.Timedelta(hours=7), # UTC -> VN Time
+                    'open': raw['o'],
+                    'high': raw['h'],
+                    'low': raw['l'],
+                    'close': raw['c'],
+                    'volume': raw['v']
+                })
                 
-                # Mapping cột VNDirect -> Chuẩn app
-                # VNDirect trả về: date, adClose, close, open, high, low, nmVolume, ...
-                df.rename(columns={'date': 'time', 'nmVolume': 'volume'}, inplace=True)
-                
-                # Xử lý thời gian và sắp xếp
-                df['time'] = pd.to_datetime(df['time'])
                 df.set_index('time', inplace=True)
-                df.sort_index(inplace=True) # Sắp xếp từ cũ đến mới
+                df.sort_index(inplace=True)
                 
-                # Chuyển đổi kiểu số
-                cols_to_num = ['open', 'high', 'low', 'close', 'volume']
-                for c in cols_to_num:
-                    df[c] = pd.to_numeric(df[c], errors='coerce')
+                # Chuyển đổi kiểu số cho chắc chắn
+                cols = ['open', 'high', 'low', 'close', 'volume']
+                for c in cols: df[c] = pd.to_numeric(df[c], errors='coerce')
                 
-                # Giữ lại các cột cần thiết
-                df = df[['open', 'high', 'low', 'close', 'volume']]
+                # Lọc bỏ các ngày không có giao dịch (Volume = 0)
+                df = df[df['volume'] > 0]
                 
                 data["df"] = df
             else:
-                data["error"] = f"Không tìm thấy dữ liệu cho mã {symbol}. Hãy kiểm tra lại mã."
+                data["error"] = f"Mã {symbol} không tồn tại hoặc không có dữ liệu."
         else:
-            data["error"] = f"Lỗi kết nối VNDirect (Status: {res.status_code})"
+            data["error"] = f"Lỗi kết nối DNSE (Status: {res.status_code})"
 
     except Exception as e:
-        data["error"] = f"Lỗi hệ thống: {str(e)}"
+        data["error"] = f"System Error: {str(e)}"
     
     return data
 
 # ---------------------------------------------------------
-# 3. STRATEGY ENGINE
+# 3. STRATEGY ENGINE (PURE TECHNICAL)
 # ---------------------------------------------------------
 def run_strategy_full(df):
-    if len(df) < 50: return df # Cần ít nhất 50 nến
+    if len(df) < 50: return df
     df = df.copy()
     
     # INDICATORS
@@ -116,19 +119,21 @@ def run_strategy_full(df):
     df['AvgVol'] = df.ta.sma(close='volume', length=50)
     df['ATR'] = df.ta.atr(length=14)
     
-    # ADX & MACD & RSI
+    # ADX
     try:
         adx = df.ta.adx(length=14)
         if adx is not None and 'ADX_14' in adx.columns: df['ADX'] = adx['ADX_14']
         else: df['ADX'] = 0
     except: df['ADX'] = 0
 
+    # MACD
     macd = df.ta.macd(fast=12, slow=26, signal=9)
     if macd is not None:
         df['MACD'] = macd['MACD_12_26_9']
         df['MACD_Signal'] = macd['MACDs_12_26_9']
         df['MACD_Hist'] = macd['MACDh_12_26_9']
 
+    # RSI
     df['RSI'] = df.ta.rsi(length=14)
     
     # ICHIMOKU
@@ -141,12 +146,12 @@ def run_strategy_full(df):
     high_lookup = df['high'].rolling(10).max()
     df['Trailing_Stop'] = high_lookup - (3 * df['ATR'])
     
-    # TREND PHASE
+    # TREND PHASE (Màu nến)
     conditions = [(df['close'] > df['MA50']), (df['close'] < df['MA50'])]
     choices = ['POSITIVE', 'NEGATIVE']
     df['Trend_Phase'] = np.select(conditions, choices, default='SIDEWAY')
 
-    # SIGNALS
+    # SIGNALS (Wyckoff & Pocket Pivot)
     hhv = df['high'].rolling(20).max().shift(1)
     llv = df['low'].rolling(20).min()
     base_tight = np.where(llv>0, (hhv-llv)/llv < 0.15, False)
@@ -198,7 +203,7 @@ def run_backtest_fast(df):
     return ret, win_rate, trades, pd.DataFrame(trade_logs)
 
 # ---------------------------------------------------------
-# 5. AI INSIGHT (PURE TECHNICAL)
+# 5. AI INSIGHT
 # ---------------------------------------------------------
 def render_ai_analysis(df, symbol):
     last = df.iloc[-1]
@@ -303,7 +308,6 @@ else:
                 
                 if not df_pos.empty:
                     fig.add_trace(go.Candlestick(x=df_pos.index, open=df_pos['open'], high=df_pos['high'], low=df_pos['low'], close=df_pos['close'], name='Uptrend', increasing_line_color='#00E676', increasing_fillcolor='#00E676', decreasing_line_color='#006400', decreasing_fillcolor='#006400'), row=1, col=1)
-                
                 if not df_neg.empty:
                     fig.add_trace(go.Candlestick(x=df_neg.index, open=df_neg['open'], high=df_neg['high'], low=df_neg['low'], close=df_neg['close'], name='Downtrend', increasing_line_color='#B71C1C', increasing_fillcolor='#B71C1C', decreasing_line_color='#FF1744', decreasing_fillcolor='#FF1744'), row=1, col=1)
 
@@ -333,7 +337,7 @@ else:
                 fig.add_hline(y=70, line_dash="dot", line_color="red", row=4, col=1)
                 fig.add_hline(y=30, line_dash="dot", line_color="green", row=4, col=1)
 
-                # AUTO ZOOM 90 DAYS (3 THÁNG)
+                # AUTO ZOOM 90 DAYS
                 end_date = df.index[-1]
                 start_date = end_date - pd.Timedelta(days=90)
                 fig.update_xaxes(range=[start_date, end_date])
