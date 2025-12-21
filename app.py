@@ -339,8 +339,8 @@ else:
                     fig.update_xaxes(showgrid=False, zeroline=False, row=r, col=1)
 
                 # ZOOM CHUẨN: 90 ngày (~3 tháng) - Đảm bảo áp dụng cho trục X dùng chung
-                if len(df) > 90:
-                    start_date = df.index[-90]
+                if len(df) > 200:
+                    start_date = df.index[-200]
                     end_date = df.index[-1]
                     fig.update_xaxes(range=[start_date, end_date])
 
@@ -373,3 +373,4 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
