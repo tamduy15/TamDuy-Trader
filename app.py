@@ -267,7 +267,7 @@ if not st.session_state.logged_in:
 else:
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
     with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
-    with c_input: symbol = st.text_input("MÃ CK", "HPG", label_visibility="collapsed").upper()
+    with c_input: symbol = st.text_input("MÃ CK", "", label_visibility="collapsed").upper()
     with c_user: st.write(f"Operator: **{st.session_state.name}**")
     with c_out: 
         if st.button("EXIT"): st.session_state.logged_in = False; st.rerun()
@@ -368,4 +368,5 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
