@@ -38,9 +38,17 @@ st.markdown("""
     .hud-val {font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: bold; color: #fff;}
     .hud-lbl {font-size: 10px; color: #888; text-transform: uppercase;}
     
+    .perf-box {
+        background-color: #161b22; border: 1px solid #30363d;
+        padding: 8px; border-radius: 4px; text-align: center;
+        margin-bottom: 5px;
+    }
+    .perf-val {font-family: 'Roboto Mono', monospace; font-size: 16px; font-weight: bold; color: #d4af37;}
+    .perf-lbl {font-size: 9px; color: #aaa; text-transform: uppercase;}
+
     .ai-panel {
         background-color: #0d1117; border: 1px solid #30363d;
-        padding: 15px; border-radius: 5px; height: 800px; overflow-y: auto;
+        padding: 15px; border-radius: 5px; height: 850px; overflow-y: auto;
     }
     .ai-title {color: #58a6ff; font-weight: bold; font-size: 16px; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;}
     .ai-text {font-size: 13px; line-height: 1.6; color: #c9d1d9;}
@@ -261,10 +269,11 @@ else:
         d = get_market_data(symbol)
         if not d["error"]:
             df = run_strategy_full(d["df"])
+            # Tính toán hiệu suất trước khi hiển thị HUD
             ret_bt, win_bt, trades_bt, logs_bt, duration_days = run_backtest_fast(df)
             last = df.iloc[-1]
             
-            # --- HUD METRICS ---
+            # --- HUD & PERFORMANCE METRICS (TOP ROW) ---
             k1, k2, k3, k4, k5 = st.columns(5)
             k1.markdown(f"<div class='hud-box'><div class='hud-val'>{last['close']:,.2f}</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
             s_col = "#00FF00" if "MUA" in last['SIGNAL'] else "#FF4B4B" if "BÁN" in last['SIGNAL'] else "#888"
@@ -272,6 +281,13 @@ else:
             k3.markdown(f"<div class='hud-box'><div class='hud-val' style='color:#FF4B4B'>{last['SL']:,.1f}</div><div class='hud-lbl'>STOP LOSS</div></div>", unsafe_allow_html=True)
             k4.markdown(f"<div class='hud-box'><div class='hud-val' style='color:#00FF00'>{last['T1']:,.1f}</div><div class='hud-lbl'>TARGET 1</div></div>", unsafe_allow_html=True)
             k5.markdown(f"<div class='hud-box'><div class='hud-val' style='color:#00E5FF'>{last['T2']:,.1f}</div><div class='hud-lbl'>TARGET 2</div></div>", unsafe_allow_html=True)
+
+            # Thống kê hiệu suất chiến lược ngay dưới HUD
+            p1, p2, p3, p4 = st.columns(4)
+            p1.markdown(f"<div class='perf-box'><div class='perf-val'>{trades_bt}</div><div class='perf-lbl'>TỔNG SỐ LỆNH</div></div>", unsafe_allow_html=True)
+            p2.markdown(f"<div class='perf-box'><div class='perf-val'>{win_bt:.1f}%</div><div class='perf-lbl'>TỶ LỆ THẮNG</div></div>", unsafe_allow_html=True)
+            p3.markdown(f"<div class='perf-box'><div class='perf-val'>{ret_bt:+.2f}%</div><div class='perf-lbl'>LỢI NHUẬN KỲ VỌNG</div></div>", unsafe_allow_html=True)
+            p4.markdown(f"<div class='perf-box'><div class='perf-val'>{duration_days} NGÀY</div><div class='perf-lbl'>THỜI GIAN THEO DÕI</div></div>", unsafe_allow_html=True)
 
             st.write("")
             col_chart, col_ai = st.columns([3, 1])
@@ -302,7 +318,7 @@ else:
                             name=name,
                             increasing_line_color=color_up, increasing_fillcolor=color_up,
                             decreasing_line_color=color_down, decreasing_fillcolor=color_down,
-                            whiskerwidth=0.8
+                            whiskerwidth=0.9 # Làm nến mập ra
                         ), row=1, col=1)
 
                 # SL/Target Lines
@@ -314,9 +330,9 @@ else:
                 
                 # Signal markers (Green for Buy, Red for Sell)
                 buys = df[df['SIGNAL'] == 'MUA']
-                if not buys.empty: fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.98, mode='markers', marker=dict(symbol='triangle-up', size=14, color='#00FF00', line=dict(width=1, color='white')), name='BUY Signal'), row=1, col=1)
+                if not buys.empty: fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.98, mode='markers', marker=dict(symbol='triangle-up', size=16, color='#00FF00', line=dict(width=1.5, color='white')), name='BUY Signal'), row=1, col=1)
                 sells = df[df['SIGNAL'] == 'BÁN']
-                if not sells.empty: fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.02, mode='markers', marker=dict(symbol='triangle-down', size=14, color='#FF1744', line=dict(width=1, color='white')), name='SELL Signal'), row=1, col=1)
+                if not sells.empty: fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.02, mode='markers', marker=dict(symbol='triangle-down', size=16, color='#FF1744', line=dict(width=1.5, color='white')), name='SELL Signal'), row=1, col=1)
 
                 # Indicators
                 fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=['#00C853' if c >= o else '#FF3D00' for c, o in zip(df['close'], df['open'])], name='Volume'), row=2, col=1)
@@ -329,15 +345,21 @@ else:
                 fig.update_yaxes(side="right", row=3, col=1)
                 fig.update_yaxes(side="right", row=4, col=1)
 
+                # Thiết lập mặc định hiển thị 60 ngày cuối để nến mập rõ ràng
+                if len(df) > 60:
+                    start_zoom = df.index[-60]
+                    end_zoom = df.index[-1]
+                    fig.update_xaxes(range=[start_zoom, end_zoom], row=1, col=1)
+
                 fig.update_layout(height=850, paper_bgcolor='#000', plot_bgcolor='#080808', margin=dict(l=0, r=50, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False)
-                st.plotly_chart(fig, use_container_width=True)
+                # Kích hoạt scrollZoom trong config
+                st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
                 
-                # --- TABS: PERFORMANCE & LOGS ---
-                t1, t2, t3 = st.tabs(["📋 NHẬT KÝ LỆNH", "📊 HIỆU SUẤT CHỈ BÁO", "⚙️ QUẢN TRỊ"])
+                # --- TABS: LOGS ---
+                t1, t2 = st.tabs(["📋 NHẬT KÝ LỆNH", "⚙️ QUẢN TRỊ"])
                 
                 with t1:
                     if not logs_bt.empty:
-                        # Làm đẹp bảng nhật ký lệnh với màu sắc ô lãi/lỗ
                         def style_pnl(val):
                             color = '#1b5e20' if val > 0 else '#b71c1c'
                             return f'background-color: {color}; color: white; font-weight: bold; border: 1px solid #333;'
@@ -350,16 +372,6 @@ else:
                     else: st.info("Hệ thống chưa ghi nhận lệnh thực tế.")
                 
                 with t2:
-                    st.markdown("### Thống kê hiệu suất chiến lược")
-                    c_perf1, c_perf2, c_perf3, c_perf4 = st.columns(4)
-                    c_perf1.metric("Tổng số lệnh", f"{trades_bt} lệnh")
-                    c_perf2.metric("Tỷ lệ thắng", f"{win_bt:.1f}%")
-                    c_perf3.metric("Lợi nhuận kỳ vọng", f"{ret_bt:.2f}%")
-                    c_perf4.metric("Thời gian theo dõi", f"{duration_days} ngày")
-                    
-                    st.caption("(*) Thống kê dựa trên dữ liệu lịch sử 3 năm gần nhất của mã cổ phiếu đang xem.")
-                    
-                with t3:
                     if st.session_state.role == "admin":
                         st.dataframe(db.get_all_users(), use_container_width=True)
                     else: st.warning("Cấp độ user hiện tại không cho phép truy cập quản trị hệ thống.")
