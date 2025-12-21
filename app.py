@@ -12,7 +12,7 @@ import requests
 # ---------------------------------------------------------
 # 1. KẾT NỐI API & CẤU HÌNH
 # ---------------------------------------------------------
-st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🦅", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🤖", initial_sidebar_state="collapsed")
 db.init_db()
 
 # --- CSS: PRO TRADING TERMINAL (TRADINGVIEW DARK STYLE) ---
@@ -255,7 +255,7 @@ if not st.session_state.logged_in:
                 else: st.error(res.get("msg", "Đăng nhập thất bại"))
 else:
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
-    with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
+    with c_logo: st.markdown("### 🤖 TAMDUY TRADER")
     with c_input: symbol = st.text_input("MÃ CK", "", label_visibility="collapsed", placeholder="Nhập mã...").upper()
     with c_user:
         days = st.session_state.get('days_left', 0); expiry = st.session_state.get('expiry_date', 'N/A')
@@ -390,3 +390,4 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
