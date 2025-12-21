@@ -318,7 +318,7 @@ else:
                             name=name,
                             increasing_line_color=color_up, increasing_fillcolor=color_up,
                             decreasing_line_color=color_down, decreasing_fillcolor=color_down,
-                            whiskerwidth=1.5 # Làm nến mập ra
+                            whiskerwidth=1.0 # Làm nến mập ra
                         ), row=1, col=1)
 
                 # SL/Target Lines
@@ -379,4 +379,5 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
