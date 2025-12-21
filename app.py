@@ -271,12 +271,28 @@ else:
             df = run_strategy_full(d["df"])
             ret_bt, win_bt, trades_bt, logs_bt, duration_days = run_backtest_fast(df)
             last = df.iloc[-1]
+            prev = df.iloc[-2] if len(df) > 1 else last
             
             # --- HUD & PERFORMANCE METRICS ---
             k1, k2, k3, k4, k5 = st.columns(5)
-            # LOGIC: Hôm nay tăng thì xanh, giảm thì đỏ cho "Giá hiện tại"
-            p_color = "#00E676" if last['close'] >= last['open'] else "#FF5252"
-            k1.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{p_color}'>{last['close']:,.2f}</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
+            
+            # LOGIC MÀU SẮC CHUYÊN SÂU: Trần (Tím), Sàn (Xanh lơ), Tăng (Xanh lá), Giảm (Đỏ)
+            change_pct = (last['close'] - prev['close']) / prev['close'] if prev['close'] != 0 else 0
+            
+            if change_pct >= 0.069: # Ước lượng trần (~7% cho HOSE)
+                p_color = "#CE55FF" # Màu Tím Trần
+            elif change_pct <= -0.069: # Ước lượng sàn (~ -7%)
+                p_color = "#66CCFF" # Màu Xanh Lơ Sàn
+            elif change_pct > 0:
+                p_color = "#00E676" # Màu Xanh Lá Tăng
+            elif change_pct < 0:
+                p_color = "#FF5252" # Màu Đỏ Giảm
+            else:
+                p_color = "#FFFFFF" # Đứng giá
+            
+            # Hiển thị Giá hiện tại kèm % thay đổi trong ngoặc
+            price_display = f"{last['close']:,.2f} ({change_pct:+.2%})"
+            k1.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{p_color}'>{price_display}</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
             
             s_col = "#00E676" if "MUA" in last['SIGNAL'] else "#FF5252" if "BÁN" in last['SIGNAL'] else "#888"
             k2.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{s_col}'>{last['SIGNAL'] if last['SIGNAL'] else 'HOLD'}</div><div class='hud-lbl'>TÍN HIỆU</div></div>", unsafe_allow_html=True)
@@ -307,7 +323,6 @@ else:
                 df_neg = df[df['Trend_Phase'] == 'NEGATIVE']
                 df_sdw = df[df['Trend_Phase'] == 'SIDEWAY']
 
-                # NẾN NHẬT CHUẨN (Màu Xanh Lá - Đỏ San Hô)
                 for trend_df, color_up, color_down, name in [
                     (df_pos, '#00E676', '#00E676', 'Positive'),
                     (df_neg, '#f23645', '#f23645', 'Negative'),
