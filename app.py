@@ -267,21 +267,21 @@ if not st.session_state.logged_in:
             u = st.text_input("Username")
             p = st.text_input("Password", type="password")
             if st.form_submit_button("LOGIN TERMINAL", use_container_width=True):
-    res = db.login_user(u, p)
-    if res["status"] == "success":
-        st.session_state.update(
-            logged_in=True, 
-            username=u, 
-            name=res["name"], 
-            role=res["role"], 
-            token=res["token"],
-            days_left=res["days_left"],   # Lưu vào session
-            expiry_date=res["expiry_date"] # Lưu vào session
+                res = db.login_user(u, p)
+                if res["status"] == "success":
+                    st.session_state.update(
+                        logged_in=True, 
+                        username=u, 
+                        name=res["name"], 
+                        role=res["role"], 
+                        token=res["token"],
+                        days_left=res["days_left"],   # Lưu vào session
+                        expiry_date=res["expiry_date"] # Lưu vào session
         )
         # Hiện thông báo bay lên ở góc màn hình
-        st.toast(f"Chào {res['name']}! Hạn dùng còn {res['days_left']} ngày.", icon="🚀")
-        time.sleep(1)
-        st.rerun()
+                        st.toast(f"Chào {res['name']}! Hạn dùng còn {res['days_left']} ngày.", icon="🚀")
+                        time.sleep(1)
+                        st.rerun()
 
 # 3. GIAO DIỆN ĐÃ ĐĂNG NHẬP THÀNH CÔNG
 # Trong file app.py, phần GIAO DIỆN ĐÃ ĐĂNG NHẬP
