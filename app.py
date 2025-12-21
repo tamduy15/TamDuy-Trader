@@ -9,9 +9,6 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import requests
 
-# --- XÓA XNOAPI ĐỂ TRÁNH LỖI 403 ---
-# Không import xnoapi nữa
-
 # ---------------------------------------------------------
 # 1. KẾT NỐI API & CẤU HÌNH
 # ---------------------------------------------------------
@@ -57,43 +54,51 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. DATA ENGINE (TCBS DIRECT API - ỔN ĐỊNH)
+# 2. DATA ENGINE (VNDIRECT API - ỔN ĐỊNH)
 # ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def get_market_data(symbol):
     data = {"df": None, "error": ""}
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
     
     try:
-        # A. PRICE DATA (LẤY TỪ TCBS - KHÔNG QUA TRUNG GIAN)
-        # Lấy 800 nến gần nhất (khoảng 3 năm)
-        price_url = f"https://apipubaws.tcbs.com.vn/stock-insight/v1/stock/bars-long-term?ticker={symbol}&type=stock&resolution=D&countBack=800"
-        res = requests.get(price_url, headers=headers, timeout=10)
+        # A. PRICE DATA (VNDIRECT FINFO)
+        # Lấy khoảng 2000 nến ngày (đủ cho vài năm)
+        url = f"https://finfo-api.vndirect.com.vn/v4/stock_prices?sort=date&q=code:{symbol}&size=2000"
+        res = requests.get(url, headers=headers, timeout=10)
         
         if res.status_code == 200:
-            raw = res.json()
-            if 'data' in raw and len(raw['data']) > 0:
-                df = pd.DataFrame(raw['data'])
-                # TCBS trả về: tradingDate, open, high, low, close, volume...
-                df.rename(columns={'tradingDate': 'time'}, inplace=True)
+            raw_data = res.json()
+            if 'data' in raw_data and len(raw_data['data']) > 0:
+                df = pd.DataFrame(raw_data['data'])
+                
+                # Mapping cột VNDirect -> Chuẩn app
+                # VNDirect trả về: date, adClose, close, open, high, low, nmVolume, ...
+                df.rename(columns={'date': 'time', 'nmVolume': 'volume'}, inplace=True)
+                
+                # Xử lý thời gian và sắp xếp
                 df['time'] = pd.to_datetime(df['time'])
                 df.set_index('time', inplace=True)
-                df.sort_index(inplace=True)
+                df.sort_index(inplace=True) # Sắp xếp từ cũ đến mới
                 
-                # Đảm bảo kiểu số
-                cols = ['open', 'high', 'low', 'close', 'volume']
-                for c in cols: df[c] = pd.to_numeric(df[c], errors='coerce')
+                # Chuyển đổi kiểu số
+                cols_to_num = ['open', 'high', 'low', 'close', 'volume']
+                for c in cols_to_num:
+                    df[c] = pd.to_numeric(df[c], errors='coerce')
+                
+                # Giữ lại các cột cần thiết
+                df = df[['open', 'high', 'low', 'close', 'volume']]
                 
                 data["df"] = df
             else:
-                data["error"] = "Không có dữ liệu giá (Mã sai hoặc sàn lỗi)."
-                return data
+                data["error"] = f"Không tìm thấy dữ liệu cho mã {symbol}. Hãy kiểm tra lại mã."
         else:
-            data["error"] = f"Lỗi kết nối TCBS (Status: {res.status_code})"
-            return data
+            data["error"] = f"Lỗi kết nối VNDirect (Status: {res.status_code})"
 
     except Exception as e:
-        data["error"] = str(e)
+        data["error"] = f"Lỗi hệ thống: {str(e)}"
     
     return data
 
@@ -101,7 +106,7 @@ def get_market_data(symbol):
 # 3. STRATEGY ENGINE
 # ---------------------------------------------------------
 def run_strategy_full(df):
-    if len(df) < 100: return df
+    if len(df) < 50: return df # Cần ít nhất 50 nến
     df = df.copy()
     
     # INDICATORS
@@ -112,11 +117,11 @@ def run_strategy_full(df):
     df['ATR'] = df.ta.atr(length=14)
     
     # ADX & MACD & RSI
-    adx = df.ta.adx(length=14)
-    if adx is not None and 'ADX_14' in adx.columns:
-        df['ADX'] = adx['ADX_14']
-    else:
-        df['ADX'] = 0 # Fallback
+    try:
+        adx = df.ta.adx(length=14)
+        if adx is not None and 'ADX_14' in adx.columns: df['ADX'] = adx['ADX_14']
+        else: df['ADX'] = 0
+    except: df['ADX'] = 0
 
     macd = df.ta.macd(fast=12, slow=26, signal=9)
     if macd is not None:
@@ -144,7 +149,6 @@ def run_strategy_full(df):
     # SIGNALS
     hhv = df['high'].rolling(20).max().shift(1)
     llv = df['low'].rolling(20).min()
-    # Fix chia cho 0
     base_tight = np.where(llv>0, (hhv-llv)/llv < 0.15, False)
     
     breakout = (df['close'] > hhv) & (df['volume'] > 1.3 * df['AvgVol']) & (df['close'] > df['MA50']) & base_tight
@@ -194,7 +198,7 @@ def run_backtest_fast(df):
     return ret, win_rate, trades, pd.DataFrame(trade_logs)
 
 # ---------------------------------------------------------
-# 5. AI INSIGHT
+# 5. AI INSIGHT (PURE TECHNICAL)
 # ---------------------------------------------------------
 def render_ai_analysis(df, symbol):
     last = df.iloc[-1]
@@ -329,7 +333,7 @@ else:
                 fig.add_hline(y=70, line_dash="dot", line_color="red", row=4, col=1)
                 fig.add_hline(y=30, line_dash="dot", line_color="green", row=4, col=1)
 
-                # AUTO ZOOM 90 DAYS
+                # AUTO ZOOM 90 DAYS (3 THÁNG)
                 end_date = df.index[-1]
                 start_date = end_date - pd.Timedelta(days=90)
                 fig.update_xaxes(range=[start_date, end_date])
