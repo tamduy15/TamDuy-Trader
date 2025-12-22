@@ -460,7 +460,7 @@ else:
 
                 # 2. VẼ MÂY ICHIMOKU (Nền dưới cùng)
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False, hoverinfo='skip'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(41, 98, 255, 1)', line=dict(width=0), showlegend=False, hoverinfo='skip'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(41, 98, 255, 0.1)', line=dict(width=0), showlegend=False, hoverinfo='skip'), row=1, col=1)
 
                 # 3. VẼ NẾN (CANDLESTICK) - TỐI ƯU HIỂN THỊ
                 for trend, color in [('POSITIVE', '#00E676'), ('NEGATIVE', '#f23645'), ('SIDEWAY', '#f0b90b')]:
@@ -558,6 +558,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
