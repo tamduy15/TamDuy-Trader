@@ -398,8 +398,9 @@ else:
                     ), row=1, col=1)
 
                 # 5. CÁC ĐƯỜNG CHỈ BÁO & HỖ TRỢ
-                fig.add_hline(y=last['SL'], line_dash="dash", line_color="#f23645", annotation_text="Stoploss", annotation_position="bottom right", row=1, col=1)
-                fig.add_hline(y=last['T1'], line_dash="dash", line_color="#00E676", annotation_text="Target 1", annotation_position="top right", row=1, col=1)
+                fig.add_hline(y=last['SL'], line_dash="dash", line_color="#f23645", annotation_text="SL", row=1, col=1)
+                fig.add_hline(y=last['T1'], line_dash="dash", line_color="#00E676", annotation_text="T1", row=1, col=1)
+                fig.add_hline(y=last['T2'], line_dash="dash", line_color="#00E5FF", annotation_text="T2", row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='rgba(41, 98, 255, 0.8)', width=1.5), name='MA50', hovertemplate='MA50: %{y:,.2f}<extra></extra>'), row=1, col=1)
                 
                 # 6. VOLUME, MACD, RSI
@@ -455,6 +456,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
