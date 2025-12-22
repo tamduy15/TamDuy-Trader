@@ -63,98 +63,92 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. DATA ENGINE (DNSE API)
+# 2. DATA ENGINE (XNO API: REAL-TIME & MARKET INDEX)
 # ---------------------------------------------------------
-import requests
-
-@st.cache_data(ttl=10) # Tự động làm mới dữ liệu mỗi 10 giây
-def get_market_data(symbol):
-    data = {"df": None, "error": ""}
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
-    }
+try:
+    from xnoapi import client
+    from xnoapi.vn.data import get_stock_hist, get_market_index_snapshot
+    from xnoapi.vn.data.stocks import Trading
     
+    # Khởi tạo với Token của bạn (lấy từ file hướng dẫn)
+    client(apikey="oWwDudF9ak5bhdIGVVNWetbQF26daMXluwItepTIBI1YQj9aWrlMlZui5lOWZ2JalVwVIhBd9LLLjmL1mXR-9ZHJZWgItFOQvihcrJLdtXAcVQzLJCiN0NrOtaYCNZf4")
+    HAS_XNO = True
+except ImportError:
+    HAS_XNO = False
+
+@st.cache_data(ttl=10) # Làm mới dữ liệu mỗi 10 giây
+def get_market_data(symbol):
+    data = {"df": None, "error": "", "market_index": {}, "realtime": {}}
+    
+    if not HAS_XNO:
+        data["error"] = "Chưa cài đặt thư viện xnoapi."
+        return data
+
     try:
-        # --- A. LẤY DỮ LIỆU LỊCH SỬ (ENTRADE - Ổn định cho Chart) ---
-        # Lấy dữ liệu 3 năm
-        end_ts = int(time.time())
-        start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60))
-        url_hist = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&from={start_ts}&to={end_ts}&resolution=1D"
+        # --- A. LẤY CHỈ SỐ THỊ TRƯỜNG (VNINDEX) ---
+        # Hàm này lấy snapshot chỉ số thị trường hiện tại
+        vnindex = get_market_index_snapshot("VNINDEX")
+        if vnindex:
+             # Lưu lại các thông tin quan trọng của VNINDEX
+             data["market_index"] = {
+                 "name": "VNINDEX",
+                 "price": vnindex.get('price', 0),      # Giá trị chỉ số
+                 "change": vnindex.get('change', 0),    # Điểm tăng giảm
+                 "percent": vnindex.get('percent', 0)   # % Tăng giảm
+             }
+
+        # --- B. LẤY BẢNG GIÁ REAL-TIME (PRICE BOARD) ---
+        # Hàm này trả về thông tin khớp lệnh, trần/sàn thời gian thực
+        pb_data = Trading.price_board([symbol])
+        current_price = 0
         
-        res = requests.get(url_hist, headers=headers, timeout=10)
-        
-        # Xử lý trường hợp không có dữ liệu lịch sử
-        if res.status_code != 200:
-            data["error"] = f"Lỗi lấy dữ liệu lịch sử (Code {res.status_code})"
-            return data
+        if pb_data and len(pb_data) > 0:
+            # Dữ liệu trả về thường là list các dict
+            item = pb_data[0] 
+            # XNO thường trả về giá dạng số (VD: 25.5 hoặc 25500)
+            raw_price = item.get('price', item.get('lastPrice', 0))
+            # Chuẩn hóa về đơn vị đồng (nếu API trả về đơn vị nghìn)
+            current_price = raw_price if raw_price > 1000 else raw_price * 1000
             
-        raw = res.json()
-        if 't' not in raw or len(raw['t']) == 0:
-            data["error"] = f"Mã {symbol} không tồn tại hoặc không có dữ liệu."
+            data["realtime"] = {
+                "price": current_price,
+                "ceil": item.get('ceil', 0) * 1000 if item.get('ceil', 0) < 1000 else item.get('ceil', 0),
+                "floor": item.get('floor', 0) * 1000 if item.get('floor', 0) < 1000 else item.get('floor', 0),
+                "vol": item.get('totalVol', item.get('volume', 0))
+            }
+
+        # --- C. LẤY DỮ LIỆU LỊCH SỬ ĐỂ VẼ CHART ---
+        df = get_stock_hist(symbol, resolution='D')
+        
+        if df is None or df.empty:
+            data["error"] = f"Không tìm thấy dữ liệu lịch sử {symbol}"
             return data
 
-        # Tạo DataFrame từ dữ liệu lịch sử
-        df = pd.DataFrame({
-            'time': pd.to_datetime(raw['t'], unit='s') + pd.Timedelta(hours=7),
-            'open': raw['o'], 'high': raw['h'], 'low': raw['l'], 'close': raw['c'], 'volume': raw['v']
-        })
-        df.set_index('time', inplace=True)
-        df.sort_index(inplace=True)
+        # Chuẩn hóa tên cột (XNO trả về Open, High... viết hoa)
+        df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'volume': 'volume'}, inplace=True)
         
-        # Ép kiểu dữ liệu số
+        # Xử lý index thời gian
+        if 'Date' in df.columns: df['time'] = pd.to_datetime(df['Date'])
+        elif 'time' not in df.columns: df.index = pd.to_datetime(df.index); df['time'] = df.index
+        df.set_index('time', inplace=True); df.sort_index(inplace=True)
+        
+        # Ép kiểu số
         for c in ['open', 'high', 'low', 'close', 'volume']: 
-            df[c] = pd.to_numeric(df[c], errors='coerce')
-        
-        # Lọc bỏ ngày không giao dịch
-        df = df[df['volume'] > 0]
+            if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
 
-        # --- B. LẤY GIÁ REAL-TIME (TCBS - Để cập nhật giá hiện tại) ---
-        try:
-            # API này trả về giá khớp lệnh tức thì
-            url_rt = f"https://apipubaws.tcbs.com.vn/stock-insight/v1/stock/overview?ticker={symbol}"
-            res_rt = requests.get(url_rt, headers=headers, timeout=5)
+        # --- D. GHÉP NẾN REAL-TIME ---
+        # Cập nhật giá đóng cửa nến cuối bằng giá khớp lệnh thật từ Trading.price_board
+        if current_price > 0:
+            last_idx = df.index[-1]
+            if last_idx.date() == datetime.now().date():
+                df.at[last_idx, 'close'] = current_price
+                if current_price > df.at[last_idx, 'high']: df.at[last_idx, 'high'] = current_price
+                if current_price < df.at[last_idx, 'low']: df.at[last_idx, 'low'] = current_price
             
-            if res_rt.status_code == 200:
-                rt_data = res_rt.json()
-                
-                # TCBS trả về giá (ví dụ 12500 hoặc 12.5 tùy sàn)
-                # Ta cần lấy giá khớp gần nhất (price)
-                if 'price' in rt_data:
-                    current_price = float(rt_data['price'])
-                    
-                    # Xác định ngày hôm nay
-                    today = datetime.now().date()
-                    if not df.empty:
-                        last_idx = df.index[-1]
-                        last_date = last_idx.date()
-                        
-                        # LOGIC GHÉP NẾN THÔNG MINH
-                        if last_date == today:
-                            # Nếu nến hôm nay đã có trong lịch sử, cập nhật lại giá Close bằng giá Realtime
-                            df.at[last_idx, 'close'] = current_price
-                            # Cập nhật High/Low nếu giá vượt biên
-                            if current_price > df.at[last_idx, 'high']: df.at[last_idx, 'high'] = current_price
-                            if current_price < df.at[last_idx, 'low']: df.at[last_idx, 'low'] = current_price
-                        elif last_date < today:
-                            # Nếu chưa có nến hôm nay (ví dụ đầu phiên sáng), tạo 1 nến mới
-                            # Dùng giá hiện tại làm Open/High/Low/Close tạm thời
-                            new_candle = pd.DataFrame({
-                                'open': [current_price], 'high': [current_price], 
-                                'low': [current_price], 'close': [current_price], 
-                                'volume': [0] # Volume tạm để 0
-                            }, index=[pd.Timestamp(datetime.now())])
-                            df = pd.concat([df, new_candle])
-                            
-        except Exception as e:
-            # Nếu lỗi phần Realtime, chỉ in ra log server, không làm crash app
-            print(f"Lỗi cập nhật Realtime: {e}")
-            pass
-
-        data["df"] = df
+        data["df"] = df[df['volume'] > 0]
 
     except Exception as e:
-        data["error"] = str(e)
+        data["error"] = f"Lỗi XNO: {str(e)}"
         
     return data
 # ---------------------------------------------------------
@@ -313,6 +307,28 @@ if not st.session_state.logged_in:
 # --- MÀN HÌNH CHÍNH (ĐÃ LOGIN) ---
 else:
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
+    # Lấy data VNINDEX từ hàm get_market_data (chạy fake 1 mã để lấy index hoặc gọi riêng)
+    # Tuy nhiên, để đơn giản, ta sẽ hiển thị nó khi user đã nhập mã CK
+    if symbol:
+        d = get_market_data(symbol)
+        # ... (Phần xử lý lỗi cũ giữ nguyên) ...
+        
+        if not d["error"]:
+            # --- HIỂN THỊ THANH THÔNG TIN THỊ TRƯỜNG ---
+            idx = d.get("market_index", {})
+            if idx:
+                idx_color = "#00E676" if idx.get('change', 0) >= 0 else "#FF5252"
+                st.markdown(f"""
+                <div style="background: #1e222d; padding: 10px; border-radius: 5px; margin-bottom: 10px; border: 1px solid #333; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: #888; font-weight: bold;">🇻🇳 {idx.get('name')}</span>
+                    <span style="font-family: 'Roboto Mono'; font-size: 1.2rem; font-weight: bold; color: {idx_color}">
+                        {idx.get('price'):,.2f} 
+                        <span style="font-size: 0.9rem;">({idx.get('change'):+.2f} / {idx.get('percent'):+.2f}%)</span>
+                    </span>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # ... (Tiếp tục phần vẽ chart cũ) ...
     with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
     with c_input: symbol = st.text_input("MÃ CK", "", label_visibility="collapsed", placeholder="Nhập mã...").upper()
     with c_user:
@@ -455,6 +471,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
