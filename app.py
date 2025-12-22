@@ -70,29 +70,28 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. DATA ENGINE (HYBRID: XNO REALTIME + ENTRADE HISTORY + TIMEZONE FIX)
+# 2. DATA ENGINE (FIX REAL-TIME: FORCE UPDATE STRATEGY)
 # ---------------------------------------------------------
 from xnoapi.vn.data import get_market_index_snapshot
 from xnoapi.vn.data.stocks import Trading
 import requests
-import pytz # Thư viện xử lý múi giờ
+import pytz # Cần đảm bảo đã cài thư viện này hoặc có sẵn
 
-@st.cache_data(ttl=5) # Refresh nhanh hơn: 5 giây
+@st.cache_data(ttl=1) # Tắt cache hoặc để rất thấp (1s) để ép lấy dữ liệu mới liên tục
 def get_market_data(symbol):
     data = {"df": None, "error": "", "market_index": {}, "realtime": {}}
     
-    # Cấu hình múi giờ Việt Nam
+    # 1. CẤU HÌNH GIỜ VIỆT NAM (Quan trọng)
     tz_vn = pytz.timezone('Asia/Ho_Chi_Minh')
     now_vn = datetime.now(tz_vn)
-    today_date = now_vn.date()
-
-    # [cite_start]1. LẤY REAL-TIME & VNINDEX TỪ XNO [cite: 141, 238]
+    
     current_price = 0
     current_vol = 0
     
+    # 2. LẤY GIÁ REAL-TIME TỪ XNO
     if HAS_XNO:
         try:
-            # A. VNINDEX
+            # [cite_start]A. VNINDEX [cite: 238]
             vnindex = get_market_index_snapshot("VNINDEX")
             if vnindex:
                  data["market_index"] = {
@@ -102,84 +101,99 @@ def get_market_data(symbol):
                      "percent": vnindex.get('percent', 0)
                  }
 
-            # B. GIÁ CỔ PHIẾU REAL-TIME
+            # [cite_start]B. STOCK REAL-TIME [cite: 141]
             pb_data = Trading.price_board([symbol])
             if pb_data and len(pb_data) > 0:
                 item = pb_data[0]
-                # Lấy giá khớp gần nhất (Match Price)
+                # Ưu tiên lấy giá khớp lệnh (matchPrice/price)
+                # API XNO có thể trả về các key khác nhau tùy thời điểm
                 raw_price = item.get('matchPrice', item.get('price', item.get('lastPrice', 0)))
                 raw_vol = item.get('totalVol', item.get('volume', 0))
                 
-                # Xử lý đơn vị: Nếu giá < 500 (nghìn đồng) thì nhân 1000 để ra đồng
-                current_price = raw_price * 1000 if raw_price < 500 else raw_price
+                # Logic chuẩn hóa đơn vị (VND)
+                # Nếu giá < 500 (tức là đơn vị nghìn), nhân 1000. VD: 21.85 -> 21850
+                price_final = raw_price * 1000 if raw_price < 500 else raw_price
+                
+                # Cập nhật biến global để dùng ghép nến
+                current_price = price_final
                 current_vol = raw_vol
                 
                 data["realtime"] = {
-                    "price": current_price,
+                    "price": price_final,
                     "ceil": item.get('ceil', 0) * 1000 if item.get('ceil', 0) < 500 else item.get('ceil', 0),
                     "floor": item.get('floor', 0) * 1000 if item.get('floor', 0) < 500 else item.get('floor', 0),
-                    "vol": current_vol
+                    "vol": raw_vol
                 }
         except Exception as e:
-            pass
+            print(f"XNO Error: {e}") # Debug in ra console server
 
-    # 2. LẤY LỊCH SỬ TỪ ENTRADE
+    # 3. LẤY LỊCH SỬ VÀ GHÉP NẾN
     try:
+        # Lấy lịch sử Entrade (nến Ngày)
         end_ts = int(time.time())
         start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60))
         url_hist = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&from={start_ts}&to={end_ts}&resolution=1D"
         
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        res = requests.get(url_hist, headers=headers, timeout=5)
+        res = requests.get(url_hist, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
         
         if res.status_code == 200:
             raw = res.json()
             if 't' in raw and len(raw['t']) > 0:
+                # Xử lý DataFrame
                 df = pd.DataFrame({
-                    'time': pd.to_datetime(raw['t'], unit='s').tz_localize('UTC').tz_convert(tz_vn), # Chuyển về giờ VN
+                    'time': pd.to_datetime(raw['t'], unit='s').tz_localize('UTC').tz_convert(tz_vn),
                     'open': raw['o'], 'high': raw['h'], 'low': raw['l'], 'close': raw['c'], 'volume': raw['v']
                 })
-                # Bỏ timezone info ở index để dễ xử lý sau này
-                df['time'] = df['time'].dt.tz_localize(None) 
+                # Loại bỏ timezone info để tránh lỗi merge
+                df['time'] = df['time'].dt.tz_localize(None)
                 df.set_index('time', inplace=True)
                 df.sort_index(inplace=True)
                 
                 for c in ['open', 'high', 'low', 'close', 'volume']: 
                     df[c] = pd.to_numeric(df[c], errors='coerce')
-                
-                # --- [QUAN TRỌNG] LOGIC CẤY NẾN REAL-TIME ---
+
+                # --- [CORE LOGIC] FORCE UPDATE ---
                 if current_price > 0:
                     last_idx = df.index[-1]
-                    last_date = last_idx.date()
+                    last_date_in_hist = last_idx.date()
+                    today_date = now_vn.date()
                     
-                    # TRƯỜNG HỢP 1: Lịch sử ĐÃ CÓ nến hôm nay -> Cập nhật giá
-                    if last_date == today_date:
+                    # Logic kiểm tra chính xác
+                    is_today_missing = last_date_in_hist < today_date
+                    
+                    if is_today_missing:
+                        # TRƯỜNG HỢP: Lịch sử chưa có ngày hôm nay -> TẠO DÒNG MỚI
+                        # Tạo Timestamp cho ngày hôm nay (lúc 00:00 hoặc giờ hiện tại đều được, miễn là đúng ngày)
+                        new_idx = pd.Timestamp(now_vn.year, now_vn.month, now_vn.day)
+                        
+                        # Tạo nến mới từ giá realtime
+                        new_candle = pd.Series({
+                            'open': current_price,
+                            'high': current_price,
+                            'low': current_price,
+                            'close': current_price,
+                            'volume': current_vol
+                        }, name=new_idx)
+                        
+                        # Dùng pd.concat thay vì append (cũ)
+                        df = pd.concat([df, pd.DataFrame([new_candle])])
+                        
+                    elif last_date_in_hist == today_date:
+                        # TRƯỜNG HỢP: Lịch sử đã có ngày hôm nay -> GHI ĐÈ GIÁ
                         df.at[last_idx, 'close'] = current_price
-                        df.at[last_idx, 'volume'] = current_vol if current_vol > 0 else df.at[last_idx, 'volume']
+                        df.at[last_idx, 'volume'] = current_vol # Cập nhật volume
+                        # Update High/Low
                         if current_price > df.at[last_idx, 'high']: df.at[last_idx, 'high'] = current_price
                         if current_price < df.at[last_idx, 'low']: df.at[last_idx, 'low'] = current_price
-                        
-                    # TRƯỜNG HỢP 2: Lịch sử CHƯA CÓ nến hôm nay (EIB đang rơi vào đây) -> Tạo mới
-                    elif last_date < today_date:
-                        # Tạo nến mới với Open/High/Low/Close bằng giá hiện tại
-                        new_row = pd.DataFrame({
-                            'open': current_price, 
-                            'high': current_price, 
-                            'low': current_price, 
-                            'close': current_price, 
-                            'volume': current_vol
-                        }, index=[pd.Timestamp(now_vn.replace(tzinfo=None))]) # Timestamp không có tz để khớp format
-                        
-                        df = pd.concat([df, new_row])
-                
+
                 data["df"] = df[df['volume'] > 0]
             else:
-                data["error"] = f"Dữ liệu trống cho {symbol}"
+                data["error"] = f"Không có dữ liệu Entrade cho {symbol}"
         else:
              data["error"] = "Lỗi kết nối Entrade."
 
     except Exception as e:
-        data["error"] = f"System Error: {str(e)}"
+        data["error"] = f"Lỗi xử lý dữ liệu: {str(e)}"
         
     return data
 # ---------------------------------------------------------
@@ -501,6 +515,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
