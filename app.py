@@ -12,7 +12,7 @@ import requests
 # ---------------------------------------------------------
 # 1. KẾT NỐI API & CẤU HÌNH GIAO DIỆN
 # ---------------------------------------------------------
-st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🤖", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🦅", initial_sidebar_state="collapsed")
 db.init_db()
 
 # --- CSS: TRADING TERMINAL STYLE ---
@@ -65,78 +65,28 @@ st.markdown("""
 # ---------------------------------------------------------
 # 2. DATA ENGINE (DNSE API)
 # ---------------------------------------------------------
-@st.cache_data(ttl=30) # Refresh mỗi 30 giây
+@st.cache_data(ttl=300)
 def get_market_data(symbol):
     data = {"df": None, "error": ""}
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
-        # --- A. LẤY DỮ LIỆU LỊCH SỬ TỪ ENTRADE (Ổn định cho Chart) ---
         end_ts = int(time.time())
         start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60))
-        url_hist = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&from={start_ts}&to={end_ts}&resolution=1D"
-        
-        res = requests.get(url_hist, headers=headers, timeout=10)
-        if res.status_code != 200:
-            data["error"] = f"Lỗi kết nối History: {res.status_code}"
-            return data
-            
-        raw = res.json()
-        if 't' not in raw or len(raw['t']) == 0:
-            data["error"] = f"Mã {symbol} không có dữ liệu lịch sử."
-            return data
-
-        df = pd.DataFrame({
-            'time': pd.to_datetime(raw['t'], unit='s') + pd.Timedelta(hours=7),
-            'open': raw['o'], 'high': raw['h'], 'low': raw['l'], 'close': raw['c'], 'volume': raw['v']
-        })
-        df.set_index('time', inplace=True); df.sort_index(inplace=True)
-        for c in ['open', 'high', 'low', 'close', 'volume']: 
-            df[c] = pd.to_numeric(df[c], errors='coerce')
-        
-        # Lọc bỏ nến volume 0 (ngày nghỉ/lỗi)
-        df = df[df['volume'] > 0]
-
-        # --- B. LẤY GIÁ REAL-TIME TỪ TCBS (Để cập nhật nến cuối) ---
-        # Đây là bước quan trọng để bảng điện HUD hiển thị giá khớp lệnh tức thì
-        try:
-            url_rt = f"https://apipubaws.tcbs.com.vn/stock-insight/v1/stock/overview?ticker={symbol}"
-            res_rt = requests.get(url_rt, headers=headers, timeout=5)
-            if res_rt.status_code == 200:
-                rt_json = res_rt.json()
-                # TCBS trả về giá (ví dụ 25500) trong field 'price' hoặc 'c' tùy endpoint
-                # Với endpoint overview, giá thường nằm ở 'price'
-                if 'price' in rt_json and rt_json['price'] > 0:
-                    current_price = float(rt_json['price'])
-                    
-                    # Logic ghép nến Real-time
-                    today = datetime.now().date()
-                    last_idx = df.index[-1]
-                    last_date = last_idx.date()
-                    
-                    if last_date == today:
-                        # Nếu đã có nến hôm nay (từ Entrade), cập nhật giá Close mới nhất
-                        df.at[last_idx, 'close'] = current_price
-                        # Cập nhật High/Low nếu giá vượt biên độ
-                        if current_price > df.at[last_idx, 'high']: df.at[last_idx, 'high'] = current_price
-                        if current_price < df.at[last_idx, 'low']: df.at[last_idx, 'low'] = current_price
-                    elif last_date < today:
-                        # Nếu chưa có nến hôm nay, tạo nến mới tạm thời
-                        new_row = pd.DataFrame({
-                            'open': [current_price], 'high': [current_price], 
-                            'low': [current_price], 'close': [current_price], 
-                            'volume': [0] # Volume tạm thời
-                        }, index=[pd.Timestamp(datetime.now())])
-                        df = pd.concat([df, new_row])
-        except Exception as e:
-            # Nếu lỗi Realtime thì thôi, vẫn hiển thị chart lịch sử bình thường
-            print(f"Lỗi Realtime TCBS: {e}")
-            pass
-
-        data["df"] = df
-
-    except Exception as e: 
-        data["error"] = str(e)
-        
+        url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&from={start_ts}&to={end_ts}&resolution=1D"
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            raw = res.json()
+            if 't' in raw and len(raw['t']) > 0:
+                df = pd.DataFrame({
+                    'time': pd.to_datetime(raw['t'], unit='s') + pd.Timedelta(hours=7),
+                    'open': raw['o'], 'high': raw['h'], 'low': raw['l'], 'close': raw['c'], 'volume': raw['v']
+                })
+                df.set_index('time', inplace=True); df.sort_index(inplace=True)
+                for c in ['open', 'high', 'low', 'close', 'volume']: df[c] = pd.to_numeric(df[c], errors='coerce')
+                data["df"] = df[df['volume'] > 0]
+            else: data["error"] = f"Mã {symbol} không có dữ liệu."
+        else: data["error"] = f"Lỗi kết nối API: {res.status_code}"
+    except Exception as e: data["error"] = str(e)
     return data
 
 # ---------------------------------------------------------
@@ -295,7 +245,7 @@ if not st.session_state.logged_in:
 # --- MÀN HÌNH CHÍNH (ĐÃ LOGIN) ---
 else:
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
-    with c_logo: st.markdown("### 🤖 TAMDUY TRADER")
+    with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
     with c_input: symbol = st.text_input("MÃ CK", "", label_visibility="collapsed", placeholder="Nhập mã...").upper()
     with c_user:
         days = st.session_state.get('days_left', 0); expiry = st.session_state.get('expiry_date', 'N/A')
