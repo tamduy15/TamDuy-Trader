@@ -4,6 +4,4 @@ numpy
 pandas_ta
 plotly
 requests
-gspread
-google-auth
 vnstock
