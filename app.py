@@ -482,22 +482,36 @@ else:
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(41, 98, 255, 0.3)', line=dict(width=0), showlegend=False, hoverinfo='skip'), row=1, col=1)
 
                 # 3. VẼ NẾN (CANDLESTICK) - TỐI ƯU HIỂN THỊ
-                for trend, color in [('POSITIVE', '#00E676'), ('NEGATIVE', '#f23645'), ('SIDEWAY', '#f0b90b')]:
-                    tdf = df[df['Trend_Phase'] == trend]
-                    if not tdf.empty: 
-                        # Tìm đoạn này trong code cũ và sửa lại các tham số open, high, low, close
-                        fig.add_trace(go.Candlestick(
-                            x=tdf.index, 
-                            open=tdf['HA_Open'],   # Thay open thường bằng HA_Open
-                            high=tdf['HA_High'],   # Thay high thường bằng HA_High
-                            low=tdf['HA_Low'],     # Thay low thường bằng HA_Low
-                            close=tdf['HA_Close'], # Thay close thường bằng HA_Close
-                            name=trend,
-                            # Màu sắc chuẩn AmiBroker: Xanh lá (Tăng) - Đỏ (Giảm)
-                            increasing_line_color='#00E676', increasing_fillcolor='#00E676', 
-                            decreasing_line_color='#FF5252', decreasing_fillcolor='#FF5252',
-                            hovertemplate='<b>Nến Heikin Ashi</b><br>Mở: %{open:,.2f}<br>Đóng: %{close:,.2f}<extra></extra>'
-                        ), row=1, col=1)
+                # --- THAY THẾ ĐOẠN VẼ NẾN CŨ BẰNG ĐOẠN NÀY ---
+                
+                # Logic: Tô màu nến theo vị trí so với đường MA20 (Signal Line)
+                # Tách dữ liệu thành 2 phe: Phe Bò (Trên MA20) và Phe Gấu (Dưới MA20)
+                bull_df = df[df['close'] >= df['MA20']]
+                bear_df = df[df['close'] < df['MA20']]
+
+                # 1. VẼ NẾN XU HƯỚNG TĂNG (MÀU XANH CHỦ ĐẠO)
+                fig.add_trace(go.Candlestick(
+                    x=bull_df.index, 
+                    open=bull_df['open'], high=bull_df['high'], low=bull_df['low'], close=bull_df['close'],
+                    name='Trend Tăng',
+                    # Nến tăng: Xanh đặc. Nến giảm: Viền Xanh, Ruột đen (để biết là điều chỉnh trong xu hướng tăng)
+                    increasing_line_color='#00E676', increasing_fillcolor='#00E676',
+                    decreasing_line_color='#00E676', decreasing_fillcolor='black', 
+                    showlegend=False
+                ), row=2, col=1)
+
+                # 2. VẼ NẾN XU HƯỚNG GIẢM (MÀU ĐỎ CHỦ ĐẠO)
+                fig.add_trace(go.Candlestick(
+                    x=bear_df.index, 
+                    open=bear_df['open'], high=bear_df['high'], low=bear_df['low'], close=bear_df['close'],
+                    name='Trend Giảm',
+                    # Nến giảm: Đỏ đặc. Nến hồi: Viền Đỏ, Ruột đen (để biết là hồi kỹ thuật trong xu hướng giảm)
+                    increasing_line_color='#FF5252', increasing_fillcolor='black',
+                    decreasing_line_color='#FF5252', decreasing_fillcolor='#FF5252',
+                    showlegend=False
+                ), row=2, col=1)
+                
+                # --- HẾT PHẦN THAY THẾ ---
                 # 4. VẼ MŨI TÊN MUA/BÁN
                 buys = df[df['SIGNAL'] == 'MUA']
                 if not buys.empty:
@@ -573,3 +587,4 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
