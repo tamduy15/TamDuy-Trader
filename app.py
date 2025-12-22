@@ -202,27 +202,8 @@ def get_market_data(symbol):
 # 3. CHIẾN LƯỢC PHÂN TÍCH (CHUẨN AMIBROKER DATCAP)
 # ---------------------------------------------------------
 def run_strategy_full(df):
-    if len(df) < 200: return df
+    if len(df) < 200: return df # Cần tối thiểu 200 nến để tính MA200
     df = df.copy()
-
-    # --- THÊM ĐOẠN NÀY: TÍNH TOÁN HEIKIN ASHI ---
-    # Công thức chuẩn AmiBroker
-    df['HA_Close'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
-    
-    # Tính HA_Open (Cần vòng lặp hoặc thuật toán nhanh)
-    ha_open = [df['open'].iloc[0]]
-    for i in range(1, len(df)):
-        # HA_Open = (Open trước + Close trước) / 2
-        ha_open.append((ha_open[-1] + df['HA_Close'].iloc[i-1]) / 2)
-    df['HA_Open'] = ha_open
-    
-    # HA_High và HA_Low lấy mức cao nhất/thấp nhất so với đỉnh đáy thật
-    df['HA_High'] = df[['high', 'HA_Open', 'HA_Close']].max(axis=1)
-    df['HA_Low'] = df[['low', 'HA_Open', 'HA_Close']].min(axis=1)
-    # ---------------------------------------------
-
-    # ... (Giữ nguyên các phần code cũ bên dưới của bạn) ...
-    # df['MA10'] = df.ta.sma(length=10) ...
     
     # 1. CÁC CHỈ BÁO CƠ BẢN (INDICATORS)
     # [cite: 540-544] MA10, 20, 50, 150, 200
@@ -512,6 +493,7 @@ else:
                 ), row=2, col=1)
                 
                 # --- HẾT PHẦN THAY THẾ ---
+
                 # 4. VẼ MŨI TÊN MUA/BÁN
                 buys = df[df['SIGNAL'] == 'MUA']
                 if not buys.empty:
@@ -587,4 +569,3 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
-
