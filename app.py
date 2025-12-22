@@ -15,7 +15,7 @@ import requests
 st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🦅", initial_sidebar_state="collapsed")
 db.init_db()
 
-# --- CSS: PRO TRADING TERMINAL (TRADINGVIEW DARK STYLE) ---
+# --- CSS: GIAO DIỆN TRADING CHUYÊN NGHIỆP ---
 st.markdown("""
 <style>
     .stApp {background-color: #000000; color: #e0e0e0;}
@@ -46,6 +46,7 @@ st.markdown("""
     .perf-val {font-family: 'Roboto Mono', monospace; font-size: 16px; font-weight: bold;}
     .perf-lbl {font-size: 9px; color: #aaa; text-transform: uppercase;}
 
+    /* AI Advisor Layout */
     .ai-panel {
         background-color: #0d1117; border: 1px solid #30363d;
         padding: 20px; border-radius: 8px; height: 850px; overflow-y: auto;
@@ -67,7 +68,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. DATA ENGINE (DNSE API)
+# 2. DATA ENGINE
 # ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def get_market_data(symbol):
@@ -96,13 +97,13 @@ def get_market_data(symbol):
     return data
 
 # ---------------------------------------------------------
-# 3. STRATEGY ENGINE
+# 3. CHIẾN LƯỢC KỸ THUẬT
 # ---------------------------------------------------------
 def run_strategy_full(df):
     if len(df) < 52: return df
     df = df.copy()
     
-    # INDICATORS CƠ BẢN
+    # CHỈ BÁO KỸ THUẬT
     df['MA20'] = df.ta.sma(length=20)
     df['MA50'] = df.ta.sma(length=50)
     df['MA200'] = df.ta.sma(length=200)
@@ -127,23 +128,20 @@ def run_strategy_full(df):
     df['SpanA'] = ((df['Tenkan'] + df['Kijun']) / 2).shift(26)
     h52 = df['high'].rolling(52).max(); l52 = df['low'].rolling(52).min(); df['SpanB'] = ((h52 + l52) / 2).shift(26)
     
-    # TREND PHASE
+    # XÁC ĐỊNH XU HƯỚNG
     df['Trend_Phase'] = 'SIDEWAY'
     df.loc[df['close'] > df['MA50'], 'Trend_Phase'] = 'POSITIVE'
     df.loc[df['close'] < df['MA50'], 'Trend_Phase'] = 'NEGATIVE'
 
-    # TARGET / STOPLOSS (ATR DYNAMIC)
-    # SL = MA50 hoặc Kijun (tùy cái nào gần giá hơn) - 0.5 ATR
+    # QUẢN TRỊ RỦI RO ĐỘNG
     df['SL'] = np.where(df['close'] > df['MA50'], 
                         np.maximum(df['MA50'], df['Kijun']) - (0.5 * df['ATR']), 
                         df['close'] - (2 * df['ATR']))
-    
-    # T1 = R:R 1.5, T2 = R:R 3.0
     risk = (df['close'] - df['SL']).abs()
     df['T1'] = df['close'] + (1.5 * risk)
     df['T2'] = df['close'] + (3.0 * risk)
 
-    # SIGNALS (BREAKOUT + VOL)
+    # TÍN HIỆU (MUA/BÁN)
     hhv_20 = df['high'].rolling(20).max().shift(1)
     buy_cond = (df['close'] > hhv_20) & (df['volume'] > 1.2 * df['AvgVol']) & (df['close'] > df['MA200'])
     sell_cond = (df['close'] < df['MA20']) & (df['close'].shift(1) >= df['MA20'].shift(1))
@@ -157,11 +155,10 @@ def run_strategy_full(df):
             if sell_cond.iloc[i]: signals.append('BÁN'); pos = 0
             else: signals.append('')
     df['SIGNAL'] = signals
-    
     return df
 
 # ---------------------------------------------------------
-# 4. BACKTEST ENGINE
+# 4. BACKTEST HIỆU SUẤT
 # ---------------------------------------------------------
 def run_backtest_fast(df):
     capital = 1_000_000_000; cash = capital; shares = 0; equity = []
@@ -179,11 +176,8 @@ def run_backtest_fast(df):
             trades += 1
             if pnl > 0: wins += 1
             trade_logs.append({
-                "Ngày Mua": entry_date.strftime('%d/%m/%Y'), 
-                "Giá Mua": entry, 
-                "Ngày Bán": date.strftime('%d/%m/%Y'), 
-                "Giá Bán": price, 
-                "Lãi/Lỗ %": pnl*100
+                "Ngày Mua": entry_date.strftime('%d/%m/%Y'), "Giá Mua": entry, 
+                "Ngày Bán": date.strftime('%d/%m/%Y'), "Giá Bán": price, "Lãi/Lỗ %": pnl*100
             })
             cash += shares * price; shares = 0
         equity.append(cash + (shares * price))
@@ -192,34 +186,20 @@ def run_backtest_fast(df):
     return ret, win_rate, trades, pd.DataFrame(trade_logs), duration_days
 
 # ---------------------------------------------------------
-# 5. AI TECHNICAL ADVISOR (UPGRADED)
+# 5. PHÂN TÍCH AI CHUYÊN SÂU
 # ---------------------------------------------------------
 def render_ai_analysis(df, symbol):
     last = df.iloc[-1]
-    prev = df.iloc[-2] if len(df) > 1 else last
+    adx = last.get('ADX', 0); adx_st = "MẠNH" if adx > 25 else "SIDEWAY"
+    rsi = last['RSI']; rsi_st = "QUÁ MUA" if rsi > 70 else "QUÁ BÁN" if rsi < 30 else "TRUNG TÍNH"
     
-    # Phân tích xu hướng & động lượng
-    adx = last.get('ADX', 0)
-    adx_st = "XU HƯỚNG MẠNH" if adx > 25 else "SIDEWAY/XU HƯỚNG YẾU"
-    rsi = last['RSI']
-    rsi_st = "QUÁ MUA (RỦI RO)" if rsi > 70 else "QUÁ BÁN (HỒI PHỤC)" if rsi < 30 else "TRUNG TÍNH"
-    
-    # Vị thế Ichimoku
     span_a = last.get('SpanA', 0); span_b = last.get('SpanB', 0)
-    ichi_pos = "TRÊN MÂY (BULLISH)" if last['close'] > max(span_a, span_b) else "DƯỚI MÂY (BEARISH)" if last['close'] < min(span_a, span_b) else "TRONG MÂY (GIẰNG CO)"
+    ichi_pos = "TRÊN MÂY (TÍCH CỰC)" if last['close'] > max(span_a, span_b) else "DƯỚI MÂY (TIÊU CỰC)" if last['close'] < min(span_a, span_b) else "TRONG MÂY"
     
-    # Chiến lược quản trị
     risk_val = (last['close'] - last['SL'])
     rr_ratio = (last['T1'] - last['close']) / risk_val if risk_val > 0 else 0
     
-    # Nhận định chuyên gia dựa trên các điều kiện
-    expert_opinion = ""
-    if last['Trend_Phase'] == 'POSITIVE' and adx > 25:
-        expert_opinion = "Cổ phiếu đang trong đà tăng trưởng mạnh mẽ với sự đồng thuận của dòng tiền. Khuyến nghị tập trung nắm giữ và tối ưu lợi nhuận tại các ngưỡng Target."
-    elif last['Trend_Phase'] == 'NEGATIVE':
-        expert_opinion = "Giá nằm dưới ngưỡng hỗ trợ trung hạn MA50, rủi ro điều chỉnh vẫn hiện hữu. Ưu tiên quản trị rủi ro và thu hẹp tỷ trọng."
-    else:
-        expert_opinion = "Thị trường đang tích lũy trong biên độ hẹp. Cần một phiên bùng nổ về khối lượng để xác nhận xu hướng tiếp theo."
+    expert_opinion = "Ưu tiên nắm giữ" if last['Trend_Phase'] == 'POSITIVE' else "Hạ tỷ trọng về an toàn"
 
     html = f"""
 <div class='ai-panel'>
@@ -227,24 +207,22 @@ def render_ai_analysis(df, symbol):
     
     <div class='ai-section-title'>VÙNG MUA (BUY ZONE)</div>
     <div class='ai-text'>
-        • <span class='ai-highlight'>Vùng hỗ trợ cứng:</span> {min(last['MA50'], last['Kijun']):,.2f} - {last['MA50']:,.2f}<br>
-        • <span class='ai-highlight'>Điểm mua kiến nghị:</span> Quanh mức {last['close'] * 0.99:,.2f} (±1%) khi có nhịp rung lắc.<br>
-        • <span class='ai-highlight'>Trạng thái:</span> {'Chờ mua khi chỉnh' if last['RSI'] > 60 else 'Có thể giải ngân thăm dò'}
+        • <span class='ai-highlight'>Hỗ trợ:</span> {min(last['MA50'], last['Kijun']):,.2f} - {last['MA50']:,.2f}<br>
+        • <span class='ai-highlight'>Điểm mua kiến nghị:</span> Quanh mức {last['close'] * 0.995:,.2f}<br>
+        • <span class='ai-highlight'>Trạng thái:</span> {'Chờ mua' if last['RSI'] > 65 else 'Giải ngân thăm dò'}
     </div>
 
     <div class='ai-section-title'>VÙNG BÁN (SELL ZONE)</div>
     <div class='ai-text'>
-        • <span class='ai-highlight'>Mục tiêu ngắn hạn (T1):</span> <span style='color:#00E676; font-weight:bold;'>{last['T1']:,.2f}</span><br>
-        • <span class='ai-highlight'>Mục tiêu trung hạn (T2):</span> <span style='color:#00E5FF; font-weight:bold;'>{last['T2']:,.2f}</span><br>
-        • <span class='ai-highlight'>Kháng cự tâm lý:</span> Vùng đỉnh cũ hoặc ngưỡng chốt lời chủ động (+15%).
+        • <span class='ai-highlight'>Mục tiêu 1 (T1):</span> <span style='color:#00E676; font-weight:bold;'>{last['T1']:,.2f}</span><br>
+        • <span class='ai-highlight'>Mục tiêu 2 (T2):</span> <span style='color:#00E5FF; font-weight:bold;'>{last['T2']:,.2f}</span><br>
     </div>
 
     <div class='ai-section-title'>CHIẾN LƯỢC QUẢN TRỊ</div>
     <div class='ai-expert-box'>
         <div class='ai-text' style='margin-left:0;'>
-            • <span style='color:#FF5252; font-weight:bold;'>Dừng lỗ (Stoploss): {last['SL']:,.1f}</span><br>
-            • <span class='ai-highlight'>Tỷ lệ R:R:</span> 1:{rr_ratio:.1f} ({'Hấp dẫn' if rr_ratio > 1.5 else 'Trung bình'})<br>
-            • <span class='ai-highlight'>Cách đi tiền:</span> Giải ngân 30% tại nền, gia tăng khi vượt đỉnh kèm Vol.
+            • <span style='color:#FF5252; font-weight:bold;'>Dừng lỗ (SL): {last['SL']:,.1f}</span><br>
+            • <span class='ai-highlight'>Tỷ lệ R:R:</span> 1:{rr_ratio:.1f} ({'Đẹp' if rr_ratio > 1.5 else 'Thấp'})
         </div>
     </div>
 
@@ -253,7 +231,6 @@ def render_ai_analysis(df, symbol):
         • <span class='ai-highlight'>Xu hướng:</span> {last['Trend_Phase']} ({adx_st})<br>
         • <span class='ai-highlight'>Động lượng (RSI):</span> {last['RSI']:.1f} - {rsi_st}<br>
         • <span class='ai-highlight'>Ichimoku:</span> {ichi_pos}<br>
-        • <span class='ai-highlight'>MACD:</span> {'Giao cắt vàng (Mua)' if last['MACD'] > last['MACD_Signal'] else 'Giao cắt tử thần (Bán)'}
     </div>
 
     <div class='ai-section-title'>NHẬN ĐỊNH</div>
@@ -265,7 +242,7 @@ def render_ai_analysis(df, symbol):
     return html
 
 # ---------------------------------------------------------
-# 6. GIAO DIỆN CHÍNH
+# 6. GIAO DIỆN & LOGIC ĐĂNG NHẬP
 # ---------------------------------------------------------
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -274,19 +251,28 @@ if st.session_state.logged_in and not db.check_token_valid(st.session_state.user
     st.session_state.logged_in = False
     st.rerun()
 
+# --- CHƯA ĐĂNG NHẬP ---
 if not st.session_state.logged_in:
     c1, c2, c3 = st.columns([1, 1, 1])
     with c2:
         st.markdown("<br><h1 style='text-align: center; color: #d4af37;'>TAMDUY CAPITAL</h1>", unsafe_allow_html=True)
         with st.form("login_form"):
-            u = st.text_input("Username"); p = st.text_input("Password", type="password")
+            u = st.text_input("Username")
+            p = st.text_input("Password", type="password")
             if st.form_submit_button("LOGIN TERMINAL", use_container_width=True):
                 res = db.login_user(u, p)
                 if res["status"] == "success":
-                    st.session_state.update(logged_in=True, username=u, name=res["name"], role=res["role"], 
-                                            token=res["token"], days_left=res.get("days_left", 0), expiry_date=res.get("expiry_date", "N/A"))
-                    st.toast(f"Chào {res['name']}!", icon="🚀"); time.sleep(1); st.rerun()
-                else: st.error(res.get("msg", "Đăng nhập thất bại"))
+                    st.session_state.update(
+                        logged_in=True, username=u, name=res["name"], role=res["role"], 
+                        token=res["token"], days_left=res["days_left"], expiry_date=res["expiry_date"]
+                    )
+                    st.toast(f"Chào {res['name']}!", icon="🚀")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error(res.get("msg", "Đăng nhập thất bại"))
+
+# --- ĐÃ ĐĂNG NHẬP ---
 else:
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
     with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
@@ -304,20 +290,14 @@ else:
         if not d["error"]:
             df = run_strategy_full(d["df"])
             ret_bt, win_bt, trades_bt, logs_bt, duration_days = run_backtest_fast(df)
-            last = df.iloc[-1]
-            prev = df.iloc[-2] if len(df) > 1 else last
+            last = df.iloc[-1]; prev = df.iloc[-2] if len(df) > 1 else last
             
-            # --- HUD & PERFORMANCE METRICS ---
+            # --- HUD & PERFORMANCE ---
             k1, k2, k3, k4, k5 = st.columns(5)
             change_pct = (last['close'] - prev['close']) / prev['close'] if prev['close'] != 0 else 0
-            if change_pct >= 0.069: p_color = "#CE55FF" # Tím Trần
-            elif change_pct <= -0.069: p_color = "#66CCFF" # Xanh Lơ Sàn
-            elif change_pct > 0: p_color = "#00E676" # Xanh Lá Tăng
-            elif change_pct < 0: p_color = "#FF5252" # Đỏ Giảm
-            else: p_color = "#FFFFFF" 
-            
-            price_display = f"{last['close']:,.2f} ({change_pct:+.2%})"
-            k1.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{p_color}'>{price_display}</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
+            # Màu sắc chuẩn Việt Nam
+            p_color = "#CE55FF" if change_pct >= 0.069 else "#66CCFF" if change_pct <= -0.069 else "#00E676" if change_pct > 0 else "#FF5252"
+            k1.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{p_color}'>{last['close']:,.2f} ({change_pct:+.2%})</div><div class='hud-lbl'>GIÁ HIỆN TẠI</div></div>", unsafe_allow_html=True)
             s_col = "#00E676" if "MUA" in last['SIGNAL'] else "#FF5252" if "BÁN" in last['SIGNAL'] else "#888"
             k2.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{s_col}'>{last['SIGNAL'] if last['SIGNAL'] else 'HOLD'}</div><div class='hud-lbl'>TÍN HIỆU</div></div>", unsafe_allow_html=True)
             k3.markdown(f"<div class='hud-box'><div class='hud-val' style='color:#FF5252'>{last['SL']:,.1f}</div><div class='hud-lbl'>STOP LOSS</div></div>", unsafe_allow_html=True)
@@ -331,12 +311,10 @@ else:
             p3.markdown(f"<div class='perf-box'><div class='perf-val' style='color: {ret_color}'>{ret_bt:+.2f}%</div><div class='perf-lbl'>LỢI NHUẬN KỲ VỌNG</div></div>", unsafe_allow_html=True)
             p4.markdown(f"<div class='perf-box'><div class='perf-val' style='color: #d4af37'>{duration_days} NGÀY</div><div class='perf-lbl'>THỜI GIAN THEO DÕI</div></div>", unsafe_allow_html=True)
 
-            st.write("")
             col_chart, col_ai = st.columns([3, 1])
-            
-            # --- CHART ---
             with col_chart:
                 fig = make_subplots(rows=4, cols=1, shared_xaxes=True, row_heights=[0.5, 0.15, 0.15, 0.2], vertical_spacing=0.015)
+                # Chart logic (TradingView Style)
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(41, 98, 255, 0.08)', line=dict(width=0), showlegend=False), row=1, col=1)
                 
@@ -360,25 +338,23 @@ else:
                 fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#7e57c2', width=1.5)), row=4, col=1)
 
                 for r in range(1, 5):
-                    fig.update_yaxes(side="right", showgrid=True, gridcolor='rgba(255, 255, 255, 0.05)', zeroline=False, row=r, col=1, tickfont=dict(color='#888', family='Roboto Mono'))
-                    fig.update_xaxes(showgrid=False, zeroline=False, row=r, col=1, tickfont=dict(color='#888'))
+                    fig.update_yaxes(side="right", showgrid=True, gridcolor='rgba(255, 255, 255, 0.05)', zeroline=False, row=r, col=1)
+                    fig.update_xaxes(showgrid=False, zeroline=False, row=r, col=1)
 
                 if len(df) > 90:
-                    start_date = df.index[-90]; end_date = df.index[-1] + timedelta(days=5)
-                    fig.update_xaxes(range=[start_date, end_date], row=1, col=1)
+                    start_zoom = df.index[-90]; end_zoom = df.index[-1] + timedelta(days=5)
+                    fig.update_xaxes(range=[start_zoom, end_zoom], row=1, col=1)
 
                 fig.update_layout(height=850, paper_bgcolor='#000', plot_bgcolor='#000', margin=dict(l=0, r=60, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False, hovermode='x unified', dragmode='pan')
                 st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True, 'modeBarButtonsToAdd': ['drawline', 'drawrect', 'eraseshape'], 'displaylogo': False})
                 
-                t1, t2 = st.tabs(["📋 NHẬT KÝ LỆNH", "⚙️ QUẢN TRỊ"])
+                t1, t2 = st.tabs(["📋 NHẬT KÝ LỆNH", "⚙️ ADMIN"])
                 with t1:
                     if not logs_bt.empty:
                         def style_pnl(val): return f"background-color: {'#1b5e20' if val > 0 else '#b71c1c'}; color: white; font-weight: bold;"
                         st.dataframe(logs_bt.style.applymap(style_pnl, subset=['Lãi/Lỗ %']).format({"Giá Mua": "{:,.2f}", "Giá Bán": "{:,.2f}", "Lãi/Lỗ %": "{:+.2f}%"}), use_container_width=True)
-                    else: st.info("Hệ thống chưa ghi nhận lệnh thực tế.")
                 with t2:
                     if st.session_state.role == "admin": st.dataframe(db.get_all_users(), use_container_width=True)
-                    else: st.warning("Admin only.")
 
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
