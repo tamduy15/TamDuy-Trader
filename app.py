@@ -404,7 +404,7 @@ else:
                 fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='rgba(41, 98, 255, 0.8)', width=1.5), name='MA50', hovertemplate='MA50: %{y:,.2f}<extra></extra>'), row=1, col=1)
                 
                 # 6. VOLUME, MACD, RSI
-                fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=['#00C853' if c >= o else '#f23645' for c, o in zip(df['close'], df['open'])], opacity=0.8, name='Volume', hovertemplate='Vol: %{y:,.0f}<extra></extra>'), row=2, col=1)
+                fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=['#00C853' if c >= o else '#f23645' for c, o in zip(df['close'], df['open'])], opacity=0.8), row=2, col=1)
                 fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=['#00E676' if h > 0 else '#f23645' for h in df['MACD_Hist']], opacity=0.8, name='MACD', hovertemplate='Hist: %{y:.2f}<extra></extra>'), row=3, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#7e57c2', width=1.5), name='RSI', hovertemplate='RSI: %{y:.1f}<extra></extra>'), row=4, col=1)
                 
@@ -455,6 +455,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
