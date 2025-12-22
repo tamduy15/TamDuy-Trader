@@ -445,34 +445,48 @@ else:
             col_chart, col_ai = st.columns([3, 1])
             with col_chart:
                 # 1. TẠO KHUNG BIỂU ĐỒ
-                fig = make_subplots(rows=4, cols=1, shared_xaxes=True, 
-                                    row_heights=[0.5, 0.15, 0.15, 0.2], 
-                                    vertical_spacing=0.02)
+                # --- KHUNG 2: MAIN STRATEGY ---
+                # 1. Vẽ Vùng mây xám (Bollinger Bands)
+                fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], mode='lines', line=dict(width=0), showlegend=False, hoverinfo='skip'), row=2, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], mode='lines', fill='tonexty', fillcolor='rgba(200, 200, 200, 0.15)', line=dict(width=0), showlegend=False, name="Band"), row=2, col=1)
+                
+                # 2. VẼ NẾN HEIKIN ASHI (Thay thế nến thường)
+                # Nến Heikin Ashi tự động lọc nhiễu: 
+                # Xu hướng tăng -> Chuỗi nến Xanh
+                # Xu hướng giảm -> Chuỗi nến Đỏ
+                fig.add_trace(go.Candlestick(
+                    x=df.index, 
+                    open=df['HA_Open'], 
+                    high=df['HA_High'], 
+                    low=df['HA_Low'], 
+                    close=df['HA_Close'],
+                    name='Heikin Ashi',
+                    # Màu sắc chuẩn: Xanh (Tăng) - Đỏ (Giảm)
+                    increasing_line_color='#00E676', increasing_fillcolor='#00E676',
+                    decreasing_line_color='#FF5252', decreasing_fillcolor='#FF5252',
+                    hovertemplate='<b>Heikin Ashi</b><br>Mở: %{open:,.2f}<br>Đóng: %{close:,.2f}<extra></extra>'
+                ), row=2, col=1)
 
-                # 2. VẼ MÂY ICHIMOKU (Nền dưới cùng)
-                fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False, hoverinfo='skip'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(41, 98, 255, 0.3)', line=dict(width=0), showlegend=False, hoverinfo='skip'), row=1, col=1)
+                # 3. Vẽ đường tín hiệu giữa (MA20)
+                fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='blue', width=1), name='Signal'), row=2, col=1)
 
-                # 3. VẼ NẾN (CANDLESTICK) - TỐI ƯU HIỂN THỊ
-                for trend, color in [('POSITIVE', '#00E676'), ('NEGATIVE', '#f23645'), ('SIDEWAY', '#f0b90b')]:
-                    tdf = df[df['Trend_Phase'] == trend]
-                    if not tdf.empty: 
-                        fig.add_trace(go.Candlestick(
-                            x=tdf.index, open=tdf['open'], high=tdf['high'], low=tdf['low'], close=tdf['close'], 
-                            name=trend,
-                            # Tăng độ dày viền nến lên 2.0 để nhìn rõ hơn
-                            increasing_line_color=color, increasing_fillcolor=color, increasing_line_width=2.0,
-                            decreasing_line_color=color, decreasing_fillcolor=color, decreasing_line_width=2.0,
-                            whiskerwidth=0.8,
-                            # Hover tiếng Việt chi tiết
-                            hovertemplate=
-                            '<b>%{x|%d/%m/%Y}</b><br>' +
-                            'Mở: %{open:,.2f}<br>' +
-                            'Cao: %{high:,.2f}<br>' +
-                            'Thấp: %{low:,.2f}<br>' +
-                            'Đóng: %{close:,.2f}<br>' +
-                            '<extra></extra>' # Ẩn phần tên trace phụ
-                        ), row=1, col=1)
+                # 4. Vẽ Mũi tên MUA/BÁN
+                buys = df[df['SIGNAL'] == 'MUA']
+                if not buys.empty:
+                    fig.add_trace(go.Scatter(
+                        x=buys.index, y=buys['low'] * 0.98,
+                        mode='markers+text', text="▲", textposition="bottom center",
+                        marker=dict(symbol='triangle-up', size=14, color='#00E676'),
+                        name='BUY'
+                    ), row=2, col=1)
+                
+                sells = df[df['SIGNAL'] == 'BÁN']
+                if not sells.empty:
+                    fig.add_trace(go.Scatter(
+                        x=sells.index, y=sells['high'] * 1.02,
+                        mode='markers', marker=dict(symbol='triangle-down', size=14, color='#FF5252'),
+                        name='SELL'
+                    ), row=2, col=1)
 
                 # 4. VẼ MŨI TÊN MUA/BÁN
                 buys = df[df['SIGNAL'] == 'MUA']
@@ -549,4 +563,5 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
