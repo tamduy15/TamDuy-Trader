@@ -339,19 +339,8 @@ else:
                     </span>
                 </div>
                 """, unsafe_allow_html=True)
-    with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
-    with c_input: symbol = st.text_input("MÃ CK", "", label_visibility="collapsed", placeholder="Nhập mã...").upper()
-    with c_user:
-        days = st.session_state.get('days_left', 0); expiry = st.session_state.get('expiry_date', 'N/A')
-        color = "#ff4b4b" if days <= 7 else "#29b045"
-        st.markdown(f"<div style='text-align: right; line-height: 1.2;'>User: <b>{st.session_state.name}</b> <br><span style='color: {color}; font-size: 0.85rem;'>Hạn: {expiry} (Còn {days} ngày)</span></div>", unsafe_allow_html=True)
-    with c_out: 
-        if st.button("EXIT"): st.session_state.logged_in = False; st.rerun()
-    st.markdown("---")
-
-    if symbol:
-        d = get_market_data(symbol)
-        if not d["error"]:
+            
+            # --- LOGIC CŨ ---
             df = run_strategy_full(d["df"])
             ret_bt, win_bt, trades_bt, logs_bt, duration_days = run_backtest_fast(df)
             last = df.iloc[-1]; prev = df.iloc[-2] if len(df) > 1 else last
@@ -481,6 +470,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
