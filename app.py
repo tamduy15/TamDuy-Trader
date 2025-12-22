@@ -405,8 +405,8 @@ else:
                 
                 # 6. VOLUME, MACD, RSI
                 fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=['#00C853' if c >= o else '#f23645' for c, o in zip(df['close'], df['open'])], opacity=0.8), row=2, col=1)
-                fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=['#00E676' if h > 0 else '#f23645' for h in df['MACD_Hist']], opacity=0.8, name='MACD', hovertemplate='Hist: %{y:.2f}<extra></extra>'), row=3, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#7e57c2', width=1.5), name='RSI', hovertemplate='RSI: %{y:.1f}<extra></extra>'), row=4, col=1)
+                fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=['#00E676' if h > 0 else '#f23645' for h in df['MACD_Hist']], opacity=0.8), row=3, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#7e57c2', width=1.5)), row=4, col=1)
                 
                 # 7. CẤU HÌNH TRỤC VÀ GIAO DIỆN (ĐÃ TỐI ƯU CHO NẾN TO)
                 # Ẩn ngày nghỉ (T7, CN) để nến sát nhau, trông to hơn
@@ -419,12 +419,12 @@ else:
                     fig.update_yaxes(side="right", showgrid=True, gridcolor='rgba(255, 255, 255, 0.05)', row=r, col=1)
                 
                 # Zoom mặc định vào 60 nến gần nhất để nến to rõ
-                fig.update_xaxes(range=[df.index[-60], df.index[-1] + timedelta(days=2)], row=1, col=1)
+                if len(df) > 60: fig.update_xaxes(range=[df.index[-60], df.index[-1] + timedelta(days=5)], row=1, col=1)
                 
                 fig.update_layout(
                     height=850, paper_bgcolor='#000', plot_bgcolor='#000', 
                     margin=dict(l=0, r=60, t=30, b=0), 
-                    showlegend=True, xaxis_rangeslider_visible=True,
+                    showlegend=False, xaxis_rangeslider_visible=False,
                     dragmode='pan', # Mặc định là chế độ kéo chart
                     hovermode='x unified' # Hiển thị thông tin dọc theo trục X
                 )
@@ -455,6 +455,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
