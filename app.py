@@ -8,6 +8,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import requests
+import pytz
+from datetime import datetime
 
 # ---------------------------------------------------------
 # 1. KẾT NỐI API & CẤU HÌNH GIAO DIỆN
@@ -515,6 +517,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
