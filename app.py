@@ -526,14 +526,6 @@ else:
 
                 st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': False})
                 
-                fig.update_layout(
-                    height=850, paper_bgcolor='#000', plot_bgcolor='#000', 
-                    margin=dict(l=0, r=60, t=30, b=0), 
-                    showlegend=False, xaxis_rangeslider_visible=False,
-                    dragmode='pan', # Mặc định là chế độ kéo chart
-                    hovermode='x unified' # Hiển thị thông tin dọc theo trục X
-                )
-                
                 # 8. CẤU HÌNH TOOLBAR VẼ (TRADINGVIEW STYLE)
                 config = {
                     'scrollZoom': True,
