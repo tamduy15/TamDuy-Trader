@@ -80,7 +80,7 @@ st.markdown("""
 # 2. DATA ENGINE (DNSE API - REALTIME)
 # ---------------------------------------------------------
 # QUAN TRỌNG: Giảm ttl xuống 5s để cập nhật giá gần như tức thời khi reload
-@st.cache_data(ttl=5) 
+@st.cache_data(ttl=1) 
 def get_market_data(symbol):
     data = {"df": None, "error": ""}
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -421,3 +421,4 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
