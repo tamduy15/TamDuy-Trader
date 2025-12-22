@@ -171,43 +171,43 @@ def render_ai_analysis(df, symbol):
     expert_opinion = "Cổ phiếu đang giữ xu hướng tốt. Ưu tiên giải ngân tại hỗ trợ." if last['Trend_Phase'] == 'POSITIVE' else "Thị trường rủi ro, giá nằm dưới MA50. Nên hạ tỷ trọng."
 
     html = f"""
-    <div class='ai-panel'>
-        <div class='ai-title'>🤖 AI ADVISOR - {symbol}</div>
+<div class='ai-panel'>
+<div class='ai-title'>🤖 AI ADVISOR - {symbol}</div>
         
-        <div class='ai-section-title'>VÙNG MUA (BUY ZONE)</div>
-        <div class='ai-text'>
-            • <span class='ai-highlight'>Hỗ trợ:</span> {min(last['MA50'], last['Kijun']):,.2f} - {last['MA50']:,.2f}<br>
-            • <span class='ai-highlight'>Điểm mua kiến nghị:</span> Quanh mức {last['close'] * 0.995:,.2f}<br>
-            • <span class='ai-highlight'>Trạng thái:</span> {'Chờ mua' if last['RSI'] > 65 else 'Giải ngân thăm dò'}
-        </div>
+<div class='ai-section-title'>VÙNG MUA (BUY ZONE)</div>
+<div class='ai-text'>
+• <span class='ai-highlight'>Hỗ trợ:</span> {min(last['MA50'], last['Kijun']):,.2f} - {last['MA50']:,.2f}<br>
+• <span class='ai-highlight'>Điểm mua kiến nghị:</span> Quanh mức {last['close'] * 0.995:,.2f}<br>
+• <span class='ai-highlight'>Trạng thái:</span> {'Chờ mua' if last['RSI'] > 65 else 'Giải ngân thăm dò'}
+</div>
 
-        <div class='ai-section-title'>VÙNG BÁN (SELL ZONE)</div>
-        <div class='ai-text'>
-            • <span class='ai-highlight'>Mục tiêu 1 (T1):</span> <span style='color:#00E676; font-weight:bold;'>{last['T1']:,.2f}</span><br>
-            • <span class='ai-highlight'>Mục tiêu 2 (T2):</span> <span style='color:#00E5FF; font-weight:bold;'>{last['T2']:,.2f}</span><br>
-        </div>
+<div class='ai-section-title'>VÙNG BÁN (SELL ZONE)</div>
+<div class='ai-text'>
+• <span class='ai-highlight'>Mục tiêu 1 (T1):</span> <span style='color:#00E676; font-weight:bold;'>{last['T1']:,.2f}</span><br>
+• <span class='ai-highlight'>Mục tiêu 2 (T2):</span> <span style='color:#00E5FF; font-weight:bold;'>{last['T2']:,.2f}</span><br>
+</div>
 
-        <div class='ai-section-title'>CHIẾN LƯỢC QUẢN TRỊ</div>
-        <div class='ai-expert-box'>
-            <div class='ai-text' style='margin-left:0;'>
-                • <span style='color:#FF5252; font-weight:bold;'>Dừng lỗ (SL): {last['SL']:,.1f}</span><br>
-                • <span class='ai-highlight'>Tỷ lệ R:R:</span> 1:{rr_ratio:.1f} ({'Đẹp' if rr_ratio > 1.5 else 'Thấp'})
-            </div>
-        </div>
+<div class='ai-section-title'>CHIẾN LƯỢC QUẢN TRỊ</div>
+<div class='ai-expert-box'>
+<div class='ai-text' style='margin-left:0;'>
+• <span style='color:#FF5252; font-weight:bold;'>Dừng lỗ (SL): {last['SL']:,.1f}</span><br>
+• <span class='ai-highlight'>Tỷ lệ R:R:</span> 1:{rr_ratio:.1f} ({'Đẹp' if rr_ratio > 1.5 else 'Thấp'})
+</div>
+</div>
 
-        <div class='ai-section-title'>PHÂN TÍCH KỸ THUẬT</div>
-        <div class='ai-text'>
-            • <span class='ai-highlight'>Xu hướng:</span> {last['Trend_Phase']} ({adx_st})<br>
-            • <span class='ai-highlight'>Động lượng (RSI):</span> {last['RSI']:.1f} ({rsi_st})<br>
-            • <span class='ai-highlight'>Ichimoku:</span> {ichi_pos}
-        </div>
+<div class='ai-section-title'>PHÂN TÍCH KỸ THUẬT</div>
+<div class='ai-text'>
+• <span class='ai-highlight'>Xu hướng:</span> {last['Trend_Phase']} ({adx_st})<br>
+• <span class='ai-highlight'>Động lượng (RSI):</span> {last['RSI']:.1f} ({rsi_st})<br>
+• <span class='ai-highlight'>Ichimoku:</span> {ichi_pos}
+</div>
 
-        <div class='ai-section-title'>NHẬN ĐỊNH</div>
-        <div class='ai-text' style='font-style: italic;'>
-            "{expert_opinion}"
-        </div>
-    </div>
-    """
+<div class='ai-section-title'>NHẬN ĐỊNH</div>
+<div class='ai-text' style='font-style: italic;'>
+"{expert_opinion}"
+</div>
+</div>
+"""
     return html
 
 # ---------------------------------------------------------
@@ -309,3 +309,4 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
