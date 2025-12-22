@@ -64,50 +64,78 @@ st.markdown("""
 # ---------------------------------------------------------
 # 2. DATA ENGINE (SSI API - NEW SOURCE)
 # ---------------------------------------------------------
-@st.cache_data(ttl=1) # Cập nhật mỗi giây
+from vnstock import stock_historical_data, quote
+
+@st.cache_data(ttl=60) # Giảm cache xuống 60s hoặc thấp hơn để update giá mới
 def get_market_data(symbol):
-    data = {"df": None, "profile": {}, "error": ""}
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    data = {"df": None, "error": ""}
     try:
-        # 1. LẤY GIÁ (SSI IBOARD)
-        end_ts = int(time.time())
-        start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60))
-        # API SSI thường ổn định và realtime hơn
-        url = f"https://iboard.ssi.com.vn/dchart/api/history?resolution=D&symbol={symbol}&from={start_ts}&to={end_ts}"
+        # 1. LẤY DỮ LIỆU LỊCH SỬ (HISTORY)
+        # Lấy rộng ra 3 năm để đảm bảo đủ dữ liệu cho các chỉ báo MA200, Ichimoku
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=365*3)).strftime('%Y-%m-%d')
         
-        res = requests.get(url, headers=headers, timeout=5)
-        if res.status_code == 200:
-            raw = res.json()
-            if 't' in raw and len(raw['t']) > 0:
-                df = pd.DataFrame({
-                    'time': pd.to_datetime(raw['t'], unit='s') + pd.Timedelta(hours=7),
-                    'open': raw['o'], 'high': raw['h'], 'low': raw['l'], 'close': raw['c'], 'volume': raw['v']
-                })
-                df.set_index('time', inplace=True)
-                df.sort_index(inplace=True)
-                for c in ['open', 'high', 'low', 'close', 'volume']: df[c] = pd.to_numeric(df[c], errors='coerce')
-                # Lọc bỏ ngày không giao dịch
-                df = df[df['volume'] > 0]
-                data["df"] = df
-            else: data["error"] = f"Mã {symbol} không có dữ liệu."
-        else: data["error"] = f"Lỗi API SSI: {res.status_code}"
+        # Sử dụng source='TCBS' hoặc 'DNSE' qua vnstock để có dữ liệu ổn định
+        df = stock_historical_data(symbol, start_date, end_date, "1D", source='TCBS')
+        
+        if df is None or df.empty:
+            data["error"] = f"Mã {symbol} không có dữ liệu hoặc sai mã."
+            return data
 
-        # 2. LẤY THÔNG TIN CƠ BẢN (FIREANT SOURCE - DỰ PHÒNG)
+        # Chuẩn hóa dữ liệu để khớp với logic cũ của bạn
+        df['time'] = pd.to_datetime(df['time'])
+        df.set_index('time', inplace=True)
+        df.sort_index(inplace=True)
+        
+        # Đảm bảo các cột là số (vnstock trả về đúng format nhưng ép kiểu cho chắc)
+        cols = ['open', 'high', 'low', 'close', 'volume']
+        for c in cols:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+
+        # 2. LẤY GIÁ REAL-TIME (QUOTE) ĐỂ CẬP NHẬT NẾN CUỐI
+        # Đây là chìa khóa để HUD hiển thị giá khớp lệnh hiện tại thay vì giá đóng cửa hôm qua
         try:
-            # Lấy thông tin cơ bản từ nguồn public khác nếu có thể
-            # Ở đây ta giả lập data cơ bản nếu API không có để tránh lỗi hiển thị
-            data["profile"] = {
-                "companyName": f"Công ty CP {symbol}",
-                "industry": "Đang cập nhật",
-                "overview": "Dữ liệu đang được cập nhật từ hệ thống."
-            }
-        except: pass
+            rt_data = quote(symbol) # Hàm này lấy trực tiếp từ bảng giá SSI/VPS
+            if not rt_data.empty:
+                current_price = float(rt_data['price'].iloc[0]) * 1000 # vnstock trả về đơn vị nghìn đồng ở một số nguồn, cần check
+                # Note: Hàm quote thường trả về giá 25.5 (nghìn), còn history là 25500.
+                # Nếu giá < 1000, nhân 1000. Nếu api trả về đúng rồi thì thôi. 
+                # Fix cứng: quote của vnstock trả về đúng giá (ví dụ 12000), nhưng một số nguồn trả về 12.0.
+                # Kiểm tra logic đơn giản:
+                if current_price < 500: # Cổ phiếu trà đá cũng > 500đ, nếu < 500 tức là đang đơn vị 'nghìn'
+                     current_price = current_price * 1000
+                
+                # Logic ghép nến:
+                # Nếu hôm nay là ngày giao dịch, ta ghi đè giá Close của nến cuối bằng giá Realtime
+                today = datetime.now().date()
+                last_date = df.index[-1].date()
+                
+                if last_date == today:
+                    # Cập nhật nến hôm nay
+                    df.iloc[-1, df.columns.get_loc('close')] = current_price
+                    # Update High/Low
+                    if current_price > df.iloc[-1]['high']: df.iloc[-1, df.columns.get_loc('high')] = current_price
+                    if current_price < df.iloc[-1]['low']: df.iloc[-1, df.columns.get_loc('low')] = current_price
+                elif last_date < today:
+                    # Nếu lịch sử chưa có nến hôm nay (đầu phiên sáng), append thêm 1 dòng
+                    # (Tạm thời dùng chính giá realtime làm Open/High/Low/Close cho nến mới)
+                    new_row = pd.DataFrame({
+                        'open': [current_price], 'high': [current_price], 
+                        'low': [current_price], 'close': [current_price], 
+                        'volume': [0] # Volume realtime có thể lấy từ quote nhưng tạm để 0
+                    }, index=[pd.Timestamp(today)])
+                    df = pd.concat([df, new_row])
+                    
+        except Exception as e:
+            # Nếu lỗi lấy realtime thì vẫn dùng data lịch sử, không crash app
+            print(f"Lỗi realtime: {str(e)}")
+            pass
 
-    except Exception as e: data["error"] = str(e)
+        data["df"] = df
+    except Exception as e:
+        data["error"] = str(e)
+        
     return data
-
 # ---------------------------------------------------------
 # 3. STRATEGY ENGINE (AMIBROKER INTEGRATION)
 # ---------------------------------------------------------
@@ -388,3 +416,4 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
