@@ -307,28 +307,38 @@ if not st.session_state.logged_in:
 # --- MÀN HÌNH CHÍNH (ĐÃ LOGIN) ---
 else:
     c_logo, c_input, c_user, c_out = st.columns([2, 2, 4, 1])
-    # Lấy data VNINDEX từ hàm get_market_data (chạy fake 1 mã để lấy index hoặc gọi riêng)
-    # Tuy nhiên, để đơn giản, ta sẽ hiển thị nó khi user đã nhập mã CK
+    with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
+    # KHAI BÁO SYMBOL TRƯỚC KHI DÙNG
+    with c_input: symbol = st.text_input("MÃ CK", "", label_visibility="collapsed", placeholder="Nhập mã...").upper()
+    with c_user:
+        days = st.session_state.get('days_left', 0); expiry = st.session_state.get('expiry_date', 'N/A')
+        color = "#ff4b4b" if days <= 7 else "#29b045"
+        st.markdown(f"<div style='text-align: right; line-height: 1.2;'>User: <b>{st.session_state.name}</b> <br><span style='color: {color}; font-size: 0.85rem;'>Hạn: {expiry} (Còn {days} ngày)</span></div>", unsafe_allow_html=True)
+    with c_out: 
+        if st.button("EXIT"): st.session_state.logged_in = False; st.rerun()
+    st.markdown("---")
+
+    # LOGIC HIỂN THỊ DỮ LIỆU
     if symbol:
         d = get_market_data(symbol)
-        # ... (Phần xử lý lỗi cũ giữ nguyên) ...
         
+        # --- [NEW] HIỂN THỊ CHỈ SỐ VNINDEX ---
         if not d["error"]:
-            # --- HIỂN THỊ THANH THÔNG TIN THỊ TRƯỜNG ---
             idx = d.get("market_index", {})
             if idx:
                 idx_color = "#00E676" if idx.get('change', 0) >= 0 else "#FF5252"
                 st.markdown(f"""
                 <div style="background: #1e222d; padding: 10px; border-radius: 5px; margin-bottom: 10px; border: 1px solid #333; display: flex; align-items: center; justify-content: space-between;">
-                    <span style="color: #888; font-weight: bold;">🇻🇳 {idx.get('name')}</span>
+                    <div>
+                        <span style="color: #d4af37; font-weight: bold; margin-right: 10px;">🇻🇳 THỊ TRƯỜNG CHUNG:</span>
+                        <span style="color: #fff; font-weight: bold;">{idx.get('name')}</span>
+                    </div>
                     <span style="font-family: 'Roboto Mono'; font-size: 1.2rem; font-weight: bold; color: {idx_color}">
                         {idx.get('price'):,.2f} 
                         <span style="font-size: 0.9rem;">({idx.get('change'):+.2f} / {idx.get('percent'):+.2f}%)</span>
                     </span>
                 </div>
                 """, unsafe_allow_html=True)
-            
-            # ... (Tiếp tục phần vẽ chart cũ) ...
     with c_logo: st.markdown("### 🦅 TAMDUY TRADER")
     with c_input: symbol = st.text_input("MÃ CK", "", label_visibility="collapsed", placeholder="Nhập mã...").upper()
     with c_user:
@@ -471,6 +481,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
