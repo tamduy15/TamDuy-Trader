@@ -70,8 +70,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. DATA ENGINE (XNO API: REAL-TIME & MARKET INDEX)
+# 2. DATA ENGINE (XNO API: QUOTE HISTORY + REALTIME)
 # ---------------------------------------------------------
+# Thêm import Quote vào đầu hàm hoặc đầu file
+from xnoapi.vn.data.stocks import Quote, Trading
+
 @st.cache_data(ttl=10) # Refresh 10s
 def get_market_data(symbol):
     data = {"df": None, "error": "", "market_index": {}, "realtime": {}}
@@ -81,7 +84,7 @@ def get_market_data(symbol):
         return data
 
     try:
-        # [cite_start]A. LẤY VNINDEX SNAPSHOT [cite: 238]
+        # A. LẤY VNINDEX SNAPSHOT
         try:
             vnindex = get_market_index_snapshot("VNINDEX")
             if vnindex:
@@ -93,15 +96,14 @@ def get_market_data(symbol):
                  }
         except: pass
 
-        # [cite_start]B. LẤY BẢNG GIÁ REAL-TIME [cite: 141]
+        # B. LẤY BẢNG GIÁ REAL-TIME
         try:
-            pb_data = Trading.price_board([symbol])
+            pb_data = Trading.price_board([symbol]) # [cite: 141, 147]
             current_price = 0
             if pb_data and len(pb_data) > 0:
                 item = pb_data[0]
-                # XNO Price Board thường trả về đơn vị nghìn đồng (ví dụ 25.5) hoặc đồng tùy sàn
                 raw_price = item.get('price', item.get('lastPrice', 0))
-                # Logic check đơn vị
+                # Logic check đơn vị giá (nếu API trả về nghìn đồng hay đồng)
                 current_price = raw_price * 1000 if raw_price < 500 else raw_price
                 
                 data["realtime"] = {
@@ -111,44 +113,61 @@ def get_market_data(symbol):
                     "vol": item.get('totalVol', item.get('volume', 0))
                 }
         except Exception as e:
-            # print(f"Lỗi realtime: {e}")
             pass
 
-        # [cite_start]C. LẤY LỊCH SỬ OHLCV [cite: 97]
-        df = get_stock_hist(symbol, resolution='D')
-        
-        if df is None or df.empty:
-            data["error"] = f"Không có dữ liệu lịch sử cho {symbol}"
-            return data
-
-        # Chuẩn hóa cột
-        df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'volume': 'volume'}, inplace=True)
-        
-        # Xử lý Index
-        if 'Date' in df.columns: df['time'] = pd.to_datetime(df['Date'])
-        elif 'time' not in df.columns: df.index = pd.to_datetime(df.index); df['time'] = df.index
-        
-        if 'time' in df.columns: df.set_index('time', inplace=True)
-        df.sort_index(inplace=True)
-        
-        for c in ['open', 'high', 'low', 'close', 'volume']: 
-            if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
-
-        # D. GHÉP NẾN REAL-TIME
-        # Nếu có giá hiện tại, update vào nến cuối
-        if 'realtime' in data and data['realtime'].get('price', 0) > 0:
-            cur_p = data['realtime']['price']
-            last_idx = df.index[-1]
-            if last_idx.date() == datetime.now().date():
-                df.at[last_idx, 'close'] = cur_p
-                if cur_p > df.at[last_idx, 'high']: df.at[last_idx, 'high'] = cur_p
-                if cur_p < df.at[last_idx, 'low']: df.at[last_idx, 'low'] = cur_p
-            # Nếu chưa có nến hôm nay, có thể append nến mới (tùy chọn)
+        # C. LẤY LỊCH SỬ DÙNG CLASS QUOTE (Fix lỗi resolution='D')
+        try:
+            # Tính ngày bắt đầu và kết thúc (lấy 3 năm)
+            end_str = datetime.now().strftime("%Y-%m-%d")
+            start_str = (datetime.now() - timedelta(days=365*3)).strftime("%Y-%m-%d")
             
-        data["df"] = df[df['volume'] > 0]
+            # Sử dụng Quote.history với interval="1D" 
+            q = Quote(symbol) # [cite: 123]
+            df = q.history(start=start_str, end=end_str, interval="1D") # 
+            
+            if df is None or df.empty:
+                data["error"] = f"Không có dữ liệu lịch sử cho {symbol}"
+                return data
+
+            # Chuẩn hóa tên cột về lowercase để khớp với logic tính toán
+            # API trả về: Date, time, Open, High, Low, Close, volume (có thể viết hoa/thường tùy version)
+            df.columns = [c.lower() for c in df.columns] 
+            # Đổi lại tên chuẩn nếu cần (đề phòng API trả về 'date' thay vì 'time')
+            df.rename(columns={'date': 'time'}, inplace=True)
+            
+            # Xử lý Index
+            if 'time' in df.columns:
+                df['time'] = pd.to_datetime(df['time'])
+                df.set_index('time', inplace=True)
+            else:
+                # Trường hợp index đã là chuỗi thời gian
+                df.index = pd.to_datetime(df.index)
+
+            df.sort_index(inplace=True)
+            
+            # Ép kiểu số cho các cột quan trọng
+            for c in ['open', 'high', 'low', 'close', 'volume']: 
+                if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
+
+            # D. GHÉP NẾN REAL-TIME
+            # Nếu có giá hiện tại, update vào nến cuối cùng của ngày hôm nay
+            if 'realtime' in data and data['realtime'].get('price', 0) > 0:
+                cur_p = data['realtime']['price']
+                last_idx = df.index[-1]
+                
+                # Chỉ update nếu nến cuối trùng ngày hôm nay
+                if last_idx.date() == datetime.now().date():
+                    df.at[last_idx, 'close'] = cur_p
+                    if cur_p > df.at[last_idx, 'high']: df.at[last_idx, 'high'] = cur_p
+                    if cur_p < df.at[last_idx, 'low']: df.at[last_idx, 'low'] = cur_p
+                
+            data["df"] = df[df['volume'] > 0]
+            
+        except Exception as e:
+             data["error"] = f"Lỗi lấy lịch sử Quote: {str(e)}"
 
     except Exception as e:
-        data["error"] = f"Lỗi XNO API: {str(e)}"
+        data["error"] = f"Lỗi XNO API Chung: {str(e)}"
         
     return data
 # ---------------------------------------------------------
@@ -470,6 +489,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
