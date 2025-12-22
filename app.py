@@ -12,6 +12,16 @@ import requests
 # ---------------------------------------------------------
 # 1. KẾT NỐI API & CẤU HÌNH GIAO DIỆN
 # ---------------------------------------------------------
+try:
+    from xnoapi import client
+    from xnoapi.vn.data import get_stock_hist, get_market_index_snapshot
+    from xnoapi.vn.data.stocks import Trading
+    # [cite_start]Token của bạn [cite: 15]
+    client(apikey="oWwDudF9ak5bhdIGVVNWetbQF26daMXluwItepTIBI1YQj9aWrlMlZui5lOWZ2JalVwVIhBd9LLLjmL1mXR-9ZHJZWgItFOQvihcrJLdtXAcVQzLJCiN0NrOtaYCNZf4")
+    HAS_XNO = True
+except ImportError:
+    HAS_XNO = False
+
 st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🦅", initial_sidebar_state="collapsed")
 db.init_db()
 
@@ -45,7 +55,7 @@ st.markdown("""
     .perf-val {font-family: 'Roboto Mono', monospace; font-size: 15px; font-weight: bold;}
     .perf-lbl {font-size: 9px; color: #aaa; text-transform: uppercase;}
 
-    /* AI Advisor Layout (TradingView Style) */
+    /* AI Advisor Layout */
     .ai-panel {
         background-color: #0d1117; border: 1px solid #30363d;
         padding: 20px; border-radius: 8px; height: 850px; overflow-y: auto;
@@ -56,99 +66,89 @@ st.markdown("""
     .ai-text {font-size: 13px; line-height: 1.7; color: #c9d1d9; margin-left: 15px;}
     .ai-highlight {color: #fff; font-weight: 600;}
     .ai-expert-box { background-color: #161b22; border-left: 4px solid #d4af37; padding: 12px; margin: 15px 0; border-radius: 0 6px 6px 0; }
-    
-    ::-webkit-scrollbar {width: 6px;}
-    ::-webkit-scrollbar-thumb {background: #333; border-radius: 3px;}
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # 2. DATA ENGINE (XNO API: REAL-TIME & MARKET INDEX)
 # ---------------------------------------------------------
-try:
-    from xnoapi import client
-    from xnoapi.vn.data import get_stock_hist, get_market_index_snapshot
-    from xnoapi.vn.data.stocks import Trading
-    
-    # Khởi tạo với Token của bạn (lấy từ file hướng dẫn)
-    client(apikey="oWwDudF9ak5bhdIGVVNWetbQF26daMXluwItepTIBI1YQj9aWrlMlZui5lOWZ2JalVwVIhBd9LLLjmL1mXR-9ZHJZWgItFOQvihcrJLdtXAcVQzLJCiN0NrOtaYCNZf4")
-    HAS_XNO = True
-except ImportError:
-    HAS_XNO = False
-
-@st.cache_data(ttl=10) # Làm mới dữ liệu mỗi 10 giây
+@st.cache_data(ttl=10) # Refresh 10s
 def get_market_data(symbol):
     data = {"df": None, "error": "", "market_index": {}, "realtime": {}}
     
     if not HAS_XNO:
-        data["error"] = "Chưa cài đặt thư viện xnoapi."
+        data["error"] = "Lỗi: Chưa cài đặt thư viện 'xnoapi' hoặc lỗi Import."
         return data
 
     try:
-        # --- A. LẤY CHỈ SỐ THỊ TRƯỜNG (VNINDEX) ---
-        # Hàm này lấy snapshot chỉ số thị trường hiện tại
-        vnindex = get_market_index_snapshot("VNINDEX")
-        if vnindex:
-             # Lưu lại các thông tin quan trọng của VNINDEX
-             data["market_index"] = {
-                 "name": "VNINDEX",
-                 "price": vnindex.get('price', 0),      # Giá trị chỉ số
-                 "change": vnindex.get('change', 0),    # Điểm tăng giảm
-                 "percent": vnindex.get('percent', 0)   # % Tăng giảm
-             }
+        # [cite_start]A. LẤY VNINDEX SNAPSHOT [cite: 238]
+        try:
+            vnindex = get_market_index_snapshot("VNINDEX")
+            if vnindex:
+                 data["market_index"] = {
+                     "name": "VNINDEX",
+                     "price": vnindex.get('price', 0),
+                     "change": vnindex.get('change', 0),
+                     "percent": vnindex.get('percent', 0)
+                 }
+        except: pass
 
-        # --- B. LẤY BẢNG GIÁ REAL-TIME (PRICE BOARD) ---
-        # Hàm này trả về thông tin khớp lệnh, trần/sàn thời gian thực
-        pb_data = Trading.price_board([symbol])
-        current_price = 0
-        
-        if pb_data and len(pb_data) > 0:
-            # Dữ liệu trả về thường là list các dict
-            item = pb_data[0] 
-            # XNO thường trả về giá dạng số (VD: 25.5 hoặc 25500)
-            raw_price = item.get('price', item.get('lastPrice', 0))
-            # Chuẩn hóa về đơn vị đồng (nếu API trả về đơn vị nghìn)
-            current_price = raw_price if raw_price > 1000 else raw_price * 1000
-            
-            data["realtime"] = {
-                "price": current_price,
-                "ceil": item.get('ceil', 0) * 1000 if item.get('ceil', 0) < 1000 else item.get('ceil', 0),
-                "floor": item.get('floor', 0) * 1000 if item.get('floor', 0) < 1000 else item.get('floor', 0),
-                "vol": item.get('totalVol', item.get('volume', 0))
-            }
+        # [cite_start]B. LẤY BẢNG GIÁ REAL-TIME [cite: 141]
+        try:
+            pb_data = Trading.price_board([symbol])
+            current_price = 0
+            if pb_data and len(pb_data) > 0:
+                item = pb_data[0]
+                # XNO Price Board thường trả về đơn vị nghìn đồng (ví dụ 25.5) hoặc đồng tùy sàn
+                raw_price = item.get('price', item.get('lastPrice', 0))
+                # Logic check đơn vị
+                current_price = raw_price * 1000 if raw_price < 500 else raw_price
+                
+                data["realtime"] = {
+                    "price": current_price,
+                    "ceil": item.get('ceil', 0) * 1000 if item.get('ceil', 0) < 500 else item.get('ceil', 0),
+                    "floor": item.get('floor', 0) * 1000 if item.get('floor', 0) < 500 else item.get('floor', 0),
+                    "vol": item.get('totalVol', item.get('volume', 0))
+                }
+        except Exception as e:
+            # print(f"Lỗi realtime: {e}")
+            pass
 
-        # --- C. LẤY DỮ LIỆU LỊCH SỬ ĐỂ VẼ CHART ---
+        # [cite_start]C. LẤY LỊCH SỬ OHLCV [cite: 97]
         df = get_stock_hist(symbol, resolution='D')
         
         if df is None or df.empty:
-            data["error"] = f"Không tìm thấy dữ liệu lịch sử {symbol}"
+            data["error"] = f"Không có dữ liệu lịch sử cho {symbol}"
             return data
 
-        # Chuẩn hóa tên cột (XNO trả về Open, High... viết hoa)
+        # Chuẩn hóa cột
         df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'volume': 'volume'}, inplace=True)
         
-        # Xử lý index thời gian
+        # Xử lý Index
         if 'Date' in df.columns: df['time'] = pd.to_datetime(df['Date'])
         elif 'time' not in df.columns: df.index = pd.to_datetime(df.index); df['time'] = df.index
-        df.set_index('time', inplace=True); df.sort_index(inplace=True)
         
-        # Ép kiểu số
+        if 'time' in df.columns: df.set_index('time', inplace=True)
+        df.sort_index(inplace=True)
+        
         for c in ['open', 'high', 'low', 'close', 'volume']: 
             if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
 
-        # --- D. GHÉP NẾN REAL-TIME ---
-        # Cập nhật giá đóng cửa nến cuối bằng giá khớp lệnh thật từ Trading.price_board
-        if current_price > 0:
+        # D. GHÉP NẾN REAL-TIME
+        # Nếu có giá hiện tại, update vào nến cuối
+        if 'realtime' in data and data['realtime'].get('price', 0) > 0:
+            cur_p = data['realtime']['price']
             last_idx = df.index[-1]
             if last_idx.date() == datetime.now().date():
-                df.at[last_idx, 'close'] = current_price
-                if current_price > df.at[last_idx, 'high']: df.at[last_idx, 'high'] = current_price
-                if current_price < df.at[last_idx, 'low']: df.at[last_idx, 'low'] = current_price
+                df.at[last_idx, 'close'] = cur_p
+                if cur_p > df.at[last_idx, 'high']: df.at[last_idx, 'high'] = cur_p
+                if cur_p < df.at[last_idx, 'low']: df.at[last_idx, 'low'] = cur_p
+            # Nếu chưa có nến hôm nay, có thể append nến mới (tùy chọn)
             
         data["df"] = df[df['volume'] > 0]
 
     except Exception as e:
-        data["error"] = f"Lỗi XNO: {str(e)}"
+        data["error"] = f"Lỗi XNO API: {str(e)}"
         
     return data
 # ---------------------------------------------------------
@@ -471,6 +471,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
