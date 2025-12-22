@@ -1,7 +1,10 @@
+git+https://github.com/xnoproject/xnoapi.git
 streamlit
 pandas
 numpy
 pandas_ta
 plotly
 requests
-xnoapi
+pytz
+gspread
+oauth2client
