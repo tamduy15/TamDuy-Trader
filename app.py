@@ -419,13 +419,12 @@ else:
                     fig.update_yaxes(side="right", showgrid=True, gridcolor='rgba(255, 255, 255, 0.05)', row=r, col=1)
                 
                 # Zoom mặc định vào 60 nến gần nhất để nến to rõ
-                if len(df) > 60: 
-                    fig.update_xaxes(range=[df.index[-60], df.index[-1] + timedelta(days=2)], row=1, col=1)
+                fig.update_xaxes(range=[df.index[-60], df.index[-1] + timedelta(days=2)], row=1, col=1)
                 
                 fig.update_layout(
                     height=850, paper_bgcolor='#000', plot_bgcolor='#000', 
                     margin=dict(l=0, r=60, t=30, b=0), 
-                    showlegend=False, xaxis_rangeslider_visible=False,
+                    showlegend=True, xaxis_rangeslider_visible=True,
                     dragmode='pan', # Mặc định là chế độ kéo chart
                     hovermode='x unified' # Hiển thị thông tin dọc theo trục X
                 )
@@ -456,6 +455,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
