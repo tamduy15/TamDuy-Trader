@@ -202,61 +202,67 @@ def get_market_data(symbol):
 # 3. CHIẾN LƯỢC PHÂN TÍCH (CHUẨN AMIBROKER DATCAP)
 # ---------------------------------------------------------
 def run_strategy_full(df):
-    if len(df) < 200: return df
+    if len(df) < 200: return df # Cần tối thiểu 200 nến để tính MA200
     df = df.copy()
-
-    # --- 1. TÍNH TOÁN HEIKIN ASHI (Tạo nến mượt) ---
-    # HA_Close = Trung bình 4 giá
-    df['HA_Close'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
     
-    # HA_Open = Trung bình của HA_Open và HA_Close phiên trước
-    # (Phải dùng vòng lặp vì giá trị sau phụ thuộc giá trị trước)
-    ha_open = [df['open'].iloc[0]]
-    ha_close = df['HA_Close'].values
-    for i in range(1, len(df)):
-        ha_open.append((ha_open[i-1] + ha_close[i-1]) / 2)
-    df['HA_Open'] = ha_open
-
-    # HA_High/Low = Đỉnh/Đáy thực tế so với HA
-    df['HA_High'] = df[['high', 'HA_Open', 'HA_Close']].max(axis=1)
-    df['HA_Low'] = df[['low', 'HA_Open', 'HA_Close']].min(axis=1)
-
-    # Xác định màu nến Heikin Ashi (Dùng để tô màu volume sau này)
-    df['HA_Color'] = np.where(df['HA_Close'] > df['HA_Open'], 'green', 'red')
-    # ----------------------------------------------------
-
-    # --- 2. CÁC CHỈ BÁO KHÁC (GIỮ NGUYÊN) ---
+    # 1. CÁC CHỈ BÁO CƠ BẢN (INDICATORS)
+    # [cite: 540-544] MA10, 20, 50, 150, 200
+    df['MA10'] = df.ta.sma(length=10)
     df['MA20'] = df.ta.sma(length=20)
     df['MA50'] = df.ta.sma(length=50)
     df['MA150'] = df.ta.sma(length=150)
     df['MA200'] = df.ta.sma(length=200)
-    df['AvgVol'] = df.ta.sma(close='volume', length=50)
-    df['RSI'] = df.ta.rsi(length=14)
-    df['ADX'] = df.ta.adx(length=14)['ADX_14']
+    df['AvgVol'] = df.ta.sma(close='volume', length=50) # [cite: 538]
+    df['ATR'] = df.ta.atr(length=14)
     
-    # Ichimoku
+    # ICHIMOKU (Giữ nguyên để vẽ chart đẹp)
     h9 = df['high'].rolling(9).max(); l9 = df['low'].rolling(9).min(); df['Tenkan'] = (h9 + l9) / 2
     h26 = df['high'].rolling(26).max(); l26 = df['low'].rolling(26).min(); df['Kijun'] = (h26 + l26) / 2
     df['SpanA'] = ((df['Tenkan'] + df['Kijun']) / 2).shift(26)
     h52 = df['high'].rolling(52).max(); l52 = df['low'].rolling(52).min(); df['SpanB'] = ((h52 + l52) / 2).shift(26)
+    df['RSI'] = df.ta.rsi(length=14)
+    macd = df.ta.macd(); df['MACD_Hist'] = macd['MACDh_12_26_9']
 
-    # Bollinger Bands (Vùng mây xám)
-    std = df['close'].rolling(20).std()
-    df['BB_Upper'] = df['MA20'] + 2 * std
-    df['BB_Lower'] = df['MA20'] - 2 * std
-
-    # Xu hướng & Signal
+    # 2. XÁC ĐỊNH XU HƯỚNG (TREND PHASE)
+    # Logic AmiBroker: TrendOK = Close > MA50 > MA150 > MA200
     df['Trend_OK'] = (df['close'] > df['MA50']) & (df['MA50'] > df['MA150']) & (df['MA150'] > df['MA200'])
+    
     df['Trend_Phase'] = 'SIDEWAY'
     df.loc[df['Trend_OK'], 'Trend_Phase'] = 'POSITIVE'
     df.loc[df['close'] < df['MA200'], 'Trend_Phase'] = 'NEGATIVE'
 
-    # Logic Mua/Bán (Dựa trên giá thực close, không dùng HA để tín hiệu chính xác)
-    high_range = df['high'].rolling(30).max().shift(1)
+    # 3. LOGIC NỀN GIÁ CHẶT (BASE TIGHT) [cite: 529, 530, 537]
+    period_base = 30
+    # Lấy đỉnh cao nhất và đáy thấp nhất trong 30 phiên TRƯỚC ĐÓ (shift 1)
+    high_range = df['high'].rolling(period_base).max().shift(1)
+    low_range = df['low'].rolling(period_base).min().shift(1)
+    base_range = high_range - low_range
+    # Điều kiện nền chặt: Biên độ < 15% (User để 10% nhưng nới lỏng 15% cho dễ bắt)
+    df['BaseTight'] = (base_range / low_range) < 0.15 
+
+    # 4. TÍN HIỆU MUA (BUY SIGNAL)
+    # A. Mua Breakout (Vượt đỉnh nền giá) [cite: 547]
+    # Volume > 1.5 lần trung bình (Vol Factor)
     breakout_cond = (df['close'] > high_range) & (df['volume'] > 1.5 * df['AvgVol'])
+    
+    # B. Mua Bật Nền MA50 (Buy From MA50) [cite: 552-554]
+    # Giá cắt lên MA50 HOẶC (Chạm MA50 rồi bật lên)
     cross_ma50 = (df['close'] > df['MA50']) & (df['close'].shift(1) <= df['MA50'].shift(1))
-    buy_final = df['Trend_OK'] & ( breakout_cond | cross_ma50 )
+    bounce_ma50 = (df['close'].shift(1) > df['MA50']) & (df['low'] <= df['MA50']) & (df['close'] > df['close'].shift(1))
+    buy_ma50 = (cross_ma50 | bounce_ma50) & (df['close'] > df['MA50'])
+
+    # C. Pocket Pivot (Dòng tiền vào sớm) [cite: 793]
+    # Volume lớn hơn volume của 10 ngày giảm gần nhất (Logic đơn giản hóa: Vol > Max Vol 10 ngày)
+    pocket_pivot = (df['volume'] > df['volume'].rolling(10).max().shift(1)) & (df['close'] > df['close'].shift(1))
+
+    # TỔNG HỢP ĐIỀU KIỆN MUA [cite: 550, 556]
+    # Ưu tiên: Trend phải OK và (Có Breakout nền chặt HOẶC Bật MA50 HOẶC Pocket Pivot)
+    buy_final = df['Trend_OK'] & ( (df['BaseTight'] & breakout_cond) | buy_ma50 | pocket_pivot )
+
+    # 5. TÍN HIỆU BÁN (SELL SIGNAL) [cite: 611, 803]
+    # Gãy MA20 (ngắn hạn) hoặc Gãy MA50 (trung hạn)
     sell_ma20 = (df['close'] < df['MA20']) & (df['close'].shift(1) >= df['MA20'].shift(1))
+    sell_ma50 = (df['close'] < df['MA50']) & (df['close'].shift(1) >= df['MA50'].shift(1))
     
     signals = []; pos = 0
     for i in range(len(df)):
@@ -264,15 +270,18 @@ def run_strategy_full(df):
             if buy_final.iloc[i]: signals.append('MUA'); pos = 1
             else: signals.append('')
         else:
+            # Nếu đang giữ hàng, bán khi gãy MA20 hoặc MA50 tùy khẩu vị (ở đây để gãy MA20 cho nhạy)
             if sell_ma20.iloc[i]: signals.append('BÁN'); pos = 0
             else: signals.append('')
+            
     df['SIGNAL'] = signals
 
-    # Trailing Stop & Target
+    # 6. STOPLOSS & TARGET (Theo Trailing Stop logic AmiBroker )
+    # Dời SL theo MA50 hoặc 7% từ giá Close
     df['SL'] = np.maximum(df['MA50'], df['close'] * 0.93) 
     risk = (df['close'] - df['SL']).abs()
-    df['T1'] = df['close'] + (2.0 * risk)
-    df['T2'] = df['close'] + (3.0 * risk)
+    df['T1'] = df['close'] + (2.0 * risk) # RR 1:2
+    df['T2'] = df['close'] + (3.0 * risk) # RR 1:3
 
     return df
 # ---------------------------------------------------------
@@ -454,36 +463,25 @@ else:
                 fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(41, 98, 255, 0.3)', line=dict(width=0), showlegend=False, hoverinfo='skip'), row=1, col=1)
 
                 # 3. VẼ NẾN (CANDLESTICK) - TỐI ƯU HIỂN THỊ
-                # --- THAY THẾ ĐOẠN VẼ NẾN CŨ BẰNG ĐOẠN NÀY ---
-                
-                # Logic: Tô màu nến theo vị trí so với đường MA20 (Signal Line)
-                # Tách dữ liệu thành 2 phe: Phe Bò (Trên MA20) và Phe Gấu (Dưới MA20)
-                bull_df = df[df['close'] >= df['MA20']]
-                bear_df = df[df['close'] < df['MA20']]
-
-                # 1. VẼ NẾN XU HƯỚNG TĂNG (MÀU XANH CHỦ ĐẠO)
-                fig.add_trace(go.Candlestick(
-                    x=bull_df.index, 
-                    open=bull_df['open'], high=bull_df['high'], low=bull_df['low'], close=bull_df['close'],
-                    name='Trend Tăng',
-                    # Nến tăng: Xanh đặc. Nến giảm: Viền Xanh, Ruột đen (để biết là điều chỉnh trong xu hướng tăng)
-                    increasing_line_color='#00E676', increasing_fillcolor='#00E676',
-                    decreasing_line_color='#00E676', decreasing_fillcolor='black', 
-                    showlegend=False
-                ), row=2, col=1)
-
-                # 2. VẼ NẾN XU HƯỚNG GIẢM (MÀU ĐỎ CHỦ ĐẠO)
-                fig.add_trace(go.Candlestick(
-                    x=bear_df.index, 
-                    open=bear_df['open'], high=bear_df['high'], low=bear_df['low'], close=bear_df['close'],
-                    name='Trend Giảm',
-                    # Nến giảm: Đỏ đặc. Nến hồi: Viền Đỏ, Ruột đen (để biết là hồi kỹ thuật trong xu hướng giảm)
-                    increasing_line_color='#FF5252', increasing_fillcolor='black',
-                    decreasing_line_color='#FF5252', decreasing_fillcolor='#FF5252',
-                    showlegend=False
-                ), row=2, col=1)
-                
-                # --- HẾT PHẦN THAY THẾ ---
+                for trend, color in [('POSITIVE', '#00E676'), ('NEGATIVE', '#f23645'), ('SIDEWAY', '#f0b90b')]:
+                    tdf = df[df['Trend_Phase'] == trend]
+                    if not tdf.empty: 
+                        fig.add_trace(go.Candlestick(
+                            x=tdf.index, open=tdf['open'], high=tdf['high'], low=tdf['low'], close=tdf['close'], 
+                            name=trend,
+                            # Tăng độ dày viền nến lên 2.0 để nhìn rõ hơn
+                            increasing_line_color=color, increasing_fillcolor=color, increasing_line_width=2.0,
+                            decreasing_line_color=color, decreasing_fillcolor=color, decreasing_line_width=2.0,
+                            whiskerwidth=0.8,
+                            # Hover tiếng Việt chi tiết
+                            hovertemplate=
+                            '<b>%{x|%d/%m/%Y}</b><br>' +
+                            'Mở: %{open:,.2f}<br>' +
+                            'Cao: %{high:,.2f}<br>' +
+                            'Thấp: %{low:,.2f}<br>' +
+                            'Đóng: %{close:,.2f}<br>' +
+                            '<extra></extra>' # Ẩn phần tên trace phụ
+                        ), row=1, col=1)
 
                 # 4. VẼ MŨI TÊN MUA/BÁN
                 buys = df[df['SIGNAL'] == 'MUA']
@@ -560,4 +558,3 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
-
