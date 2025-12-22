@@ -64,8 +64,6 @@ st.markdown("""
 # ---------------------------------------------------------
 # 2. DATA ENGINE (SSI API - NEW SOURCE)
 # ---------------------------------------------------------
-from vnstock import stock_historical_data, quote
-
 @st.cache_data(ttl=60) # Giảm cache xuống 60s hoặc thấp hơn để update giá mới
 def get_market_data(symbol):
     data = {"df": None, "error": ""}
@@ -416,4 +414,5 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
