@@ -350,22 +350,68 @@ else:
 
             col_chart, col_ai = st.columns([3, 1])
             with col_chart:
-                fig = make_subplots(rows=4, cols=1, shared_xaxes=True, row_heights=[0.5, 0.15, 0.15, 0.2], vertical_spacing=0.015)
-                fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(41, 98, 255, 0.08)', line=dict(width=0), showlegend=False), row=1, col=1)
+                # 1. TẠO KHUNG BIỂU ĐỒ
+                fig = make_subplots(rows=4, cols=1, shared_xaxes=True, 
+                                    row_heights=[0.5, 0.15, 0.15, 0.2], 
+                                    vertical_spacing=0.015)
+
+                # 2. VẼ MÂY ICHIMOKU (Nền dưới cùng)
+                fig.add_trace(go.Scatter(x=df.index, y=df['SpanA'], line=dict(width=0), showlegend=False, hoverinfo='skip'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['SpanB'], fill='tonexty', fillcolor='rgba(41, 98, 255, 0.08)', line=dict(width=0), showlegend=False, hoverinfo='skip'), row=1, col=1)
+
+                # 3. VẼ NẾN (CANDLESTICK) THEO MÀU XU HƯỚNG
                 for trend, color in [('POSITIVE', '#00E676'), ('NEGATIVE', '#f23645'), ('SIDEWAY', '#f0b90b')]:
                     tdf = df[df['Trend_Phase'] == trend]
-                    if not tdf.empty: fig.add_trace(go.Candlestick(x=tdf.index, open=tdf['open'], high=tdf['high'], low=tdf['low'], close=tdf['close'], name=trend, increasing_line_color=color, increasing_fillcolor=color, decreasing_line_color=color, decreasing_fillcolor=color, whiskerwidth=0.8, line_width=1.5), row=1, col=1)
+                    if not tdf.empty: 
+                        fig.add_trace(go.Candlestick(
+                            x=tdf.index, open=tdf['open'], high=tdf['high'], low=tdf['low'], close=tdf['close'], 
+                            name=trend, 
+                            increasing_line_color=color, increasing_fillcolor=color, 
+                            decreasing_line_color=color, decreasing_fillcolor=color, 
+                            whiskerwidth=0.8, line_width=1.5
+                        ), row=1, col=1)
+
+                # --- [NEW] 4. VẼ MŨI TÊN MUA/BÁN (PHẦN BẠN CẦN THÊM) ---
+                # Lọc ra các điểm MUA
+                buys = df[df['SIGNAL'] == 'MUA']
+                if not buys.empty:
+                    fig.add_trace(go.Scatter(
+                        x=buys.index, y=buys['low'] * 0.98, # Vẽ thấp hơn giá thấp nhất 1 chút
+                        mode='markers',
+                        marker=dict(symbol='triangle-up', size=15, color='#00E676', line=dict(width=1, color='black')),
+                        name='ĐIỂM MUA', hovertemplate='MUA: %{y:,.2f}'
+                    ), row=1, col=1)
+
+                # Lọc ra các điểm BÁN
+                sells = df[df['SIGNAL'] == 'BÁN']
+                if not sells.empty:
+                    fig.add_trace(go.Scatter(
+                        x=sells.index, y=sells['high'] * 1.02, # Vẽ cao hơn giá cao nhất 1 chút
+                        mode='markers',
+                        marker=dict(symbol='triangle-down', size=15, color='#FF5252', line=dict(width=1, color='black')),
+                        name='ĐIỂM BÁN', hovertemplate='BÁN: %{y:,.2f}'
+                    ), row=1, col=1)
+                # -------------------------------------------------------
+
+                # 5. CÁC ĐƯỜNG CHỈ BÁO KHÁC (MA, SL, TP)
                 fig.add_hline(y=last['SL'], line_dash="dash", line_color="#f23645", annotation_text="SL", row=1, col=1)
                 fig.add_hline(y=last['T1'], line_dash="dash", line_color="#00E676", annotation_text="T1", row=1, col=1)
                 fig.add_hline(y=last['T2'], line_dash="dash", line_color="#00E5FF", annotation_text="T2", row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='rgba(41, 98, 255, 0.8)', width=1.8), name='MA50'), row=1, col=1)
-                fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=['#00C853' if c >= o else '#f23645' for c, o in zip(df['close'], df['open'])], opacity=0.8), row=2, col=1)
-                fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=['#00E676' if h > 0 else '#f23645' for h in df['MACD_Hist']], opacity=0.8), row=3, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#7e57c2', width=1.5)), row=4, col=1)
+                
+                # 6. VOLUME, MACD, RSI (Các ngăn dưới)
+                fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=['#00C853' if c >= o else '#f23645' for c, o in zip(df['close'], df['open'])], opacity=0.8, name='Volume'), row=2, col=1)
+                fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=['#00E676' if h > 0 else '#f23645' for h in df['MACD_Hist']], opacity=0.8, name='MACD'), row=3, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#7e57c2', width=1.5), name='RSI'), row=4, col=1)
+                
+                # 7. CẤU HÌNH TRỤC VÀ GIAO DIỆN
                 for r in range(1, 5): fig.update_yaxes(side="right", showgrid=True, gridcolor='rgba(255, 255, 255, 0.05)', row=r, col=1)
                 if len(df) > 90: fig.update_xaxes(range=[df.index[-90], df.index[-1] + timedelta(days=5)], row=1, col=1)
-                fig.update_layout(height=850, paper_bgcolor='#000', plot_bgcolor='#000', margin=dict(l=0, r=60, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False, dragmode='pan')
+                
+                fig.update_layout(height=850, paper_bgcolor='#000', plot_bgcolor='#000', 
+                                  margin=dict(l=0, r=60, t=30, b=0), showlegend=False, 
+                                  xaxis_rangeslider_visible=False, dragmode='pan')
+                
                 st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True, 'displaylogo': False})
                 t_log, t_adm = st.tabs(["📋 NHẬT KÝ LỆNH", "⚙️ ADMIN"])
                 with t_log:
@@ -377,6 +423,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
