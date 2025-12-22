@@ -65,28 +65,66 @@ st.markdown("""
 # ---------------------------------------------------------
 # 2. DATA ENGINE (DNSE API)
 # ---------------------------------------------------------
-@st.cache_data(ttl=300)
+try:
+    from xnoapi import client
+    from xnoapi.vn.data import get_stock_hist
+    # Khởi tạo Token của bạn
+    client(apikey="oWwDudF9ak5bhdIGVVNWetbQF26daMXluwItepTIBI1YQj9aWrlMlZui5lOWZ2JalVwVIhBd9LLLjmL1mXR-9ZHJZWgItFOQvihcrJLdtXAcVQzLJCiN0NrOtaYCNZf4")
+    HAS_XNO = True
+except ImportError:
+    HAS_XNO = False
+
+@st.cache_data(ttl=60) # Refresh 60s/lần
 def get_market_data(symbol):
     data = {"df": None, "error": ""}
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    if not HAS_XNO:
+        data["error"] = "Lỗi: Chưa cài đặt thư viện 'xnoapi'. Hãy kiểm tra file requirements.txt"
+        return data
+
     try:
-        end_ts = int(time.time())
-        start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60))
-        url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&from={start_ts}&to={end_ts}&resolution=1D"
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            raw = res.json()
-            if 't' in raw and len(raw['t']) > 0:
-                df = pd.DataFrame({
-                    'time': pd.to_datetime(raw['t'], unit='s') + pd.Timedelta(hours=7),
-                    'open': raw['o'], 'high': raw['h'], 'low': raw['l'], 'close': raw['c'], 'volume': raw['v']
-                })
-                df.set_index('time', inplace=True); df.sort_index(inplace=True)
-                for c in ['open', 'high', 'low', 'close', 'volume']: df[c] = pd.to_numeric(df[c], errors='coerce')
-                data["df"] = df[df['volume'] > 0]
-            else: data["error"] = f"Mã {symbol} không có dữ liệu."
-        else: data["error"] = f"Lỗi kết nối API: {res.status_code}"
-    except Exception as e: data["error"] = str(e)
+        # Lấy dữ liệu Daily (D) để phân tích xu hướng
+        # XNO thường trả về cả nến của ngày hôm nay (Real-time snapshot)
+        df = get_stock_hist(symbol, resolution='D')
+        
+        if df is None or df.empty:
+            data["error"] = f"Mã {symbol} không có dữ liệu từ XNO."
+            return data
+
+        # Chuẩn hóa tên cột từ XNO (Open, High...) về lowercase (open, high...) cho app của bạn
+        df.rename(columns={
+            'Open': 'open', 'High': 'high', 'Low': 'low', 
+            'Close': 'close', 'volume': 'volume'
+        }, inplace=True)
+
+        # Xử lý Index thời gian
+        # API có thể trả về cột 'Date' hoặc 'time', cần set làm index
+        if 'Date' in df.columns:
+            df['time'] = pd.to_datetime(df['Date'])
+        elif 'time' not in df.columns:
+            # Trường hợp index đã là thời gian
+            df.index = pd.to_datetime(df.index)
+            df['time'] = df.index
+
+        # Set Index chuẩn
+        if 'time' in df.columns:
+            df.set_index('time', inplace=True)
+            
+        df.sort_index(inplace=True)
+        
+        # Đảm bảo dữ liệu dạng số
+        cols = ['open', 'high', 'low', 'close', 'volume']
+        for c in cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors='coerce')
+
+        # Lọc bỏ dữ liệu lỗi (volume = 0 hoặc NaN)
+        df = df[df['volume'] > 0]
+        data["df"] = df
+
+    except Exception as e:
+        data["error"] = f"Lỗi XNO API: {str(e)}"
+        
     return data
 
 # ---------------------------------------------------------
@@ -309,4 +347,5 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
