@@ -70,22 +70,22 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. DATA ENGINE (XNO API: QUOTE HISTORY + REALTIME)
+# 2. DATA ENGINE (HYBRID: XNO REALTIME + ENTRADE HISTORY)
 # ---------------------------------------------------------
-# Thêm import Quote vào đầu hàm hoặc đầu file
-from xnoapi.vn.data.stocks import Quote, Trading
+# Import các thư viện cần thiết
+from xnoapi.vn.data import get_market_index_snapshot
+from xnoapi.vn.data.stocks import Trading
+import requests
 
-@st.cache_data(ttl=10) # Refresh 10s
+@st.cache_data(ttl=10) # Refresh dữ liệu mỗi 10 giây
 def get_market_data(symbol):
     data = {"df": None, "error": "", "market_index": {}, "realtime": {}}
     
-    if not HAS_XNO:
-        data["error"] = "Lỗi: Chưa cài đặt thư viện 'xnoapi' hoặc lỗi Import."
-        return data
-
-    try:
-        # A. LẤY VNINDEX SNAPSHOT
+    # 1. LẤY THÔNG TIN THỊ TRƯỜNG TỪ XNO API (VNINDEX & REALTIME)
+    if HAS_XNO:
         try:
+            # A. Lấy VNINDEX Snapshot
+            # Hàm get_market_index_snapshot lấy thông tin chỉ số thị trường [cite: 238]
             vnindex = get_market_index_snapshot("VNINDEX")
             if vnindex:
                  data["market_index"] = {
@@ -94,16 +94,14 @@ def get_market_data(symbol):
                      "change": vnindex.get('change', 0),
                      "percent": vnindex.get('percent', 0)
                  }
-        except: pass
 
-        # B. LẤY BẢNG GIÁ REAL-TIME
-        try:
-            pb_data = Trading.price_board([symbol]) # [cite: 141, 147]
-            current_price = 0
+            # B. Lấy giá khớp lệnh Real-time
+            # Hàm Trading.price_board lấy bảng giá trực tuyến [cite: 141]
+            pb_data = Trading.price_board([symbol])
             if pb_data and len(pb_data) > 0:
                 item = pb_data[0]
+                # Xử lý đơn vị giá (một số nguồn trả về nghìn đồng, một số trả về đồng)
                 raw_price = item.get('price', item.get('lastPrice', 0))
-                # Logic check đơn vị giá (nếu API trả về nghìn đồng hay đồng)
                 current_price = raw_price * 1000 if raw_price < 500 else raw_price
                 
                 data["realtime"] = {
@@ -113,61 +111,50 @@ def get_market_data(symbol):
                     "vol": item.get('totalVol', item.get('volume', 0))
                 }
         except Exception as e:
+            # Nếu XNO lỗi (do mạng/token), chỉ in log, không làm sập app vì vẫn cần vẽ chart
+            print(f"Lỗi XNO Realtime: {str(e)}")
             pass
 
-        # C. LẤY LỊCH SỬ DÙNG CLASS QUOTE (Fix lỗi resolution='D')
-        try:
-            # Tính ngày bắt đầu và kết thúc (lấy 3 năm)
-            end_str = datetime.now().strftime("%Y-%m-%d")
-            start_str = (datetime.now() - timedelta(days=365*3)).strftime("%Y-%m-%d")
-            
-            # Sử dụng Quote.history với interval="1D" 
-            q = Quote(symbol) # [cite: 123]
-            df = q.history(start=start_str, end=end_str, interval="1D") # 
-            
-            if df is None or df.empty:
-                data["error"] = f"Không có dữ liệu lịch sử cho {symbol}"
-                return data
-
-            # Chuẩn hóa tên cột về lowercase để khớp với logic tính toán
-            # API trả về: Date, time, Open, High, Low, Close, volume (có thể viết hoa/thường tùy version)
-            df.columns = [c.lower() for c in df.columns] 
-            # Đổi lại tên chuẩn nếu cần (đề phòng API trả về 'date' thay vì 'time')
-            df.rename(columns={'date': 'time'}, inplace=True)
-            
-            # Xử lý Index
-            if 'time' in df.columns:
-                df['time'] = pd.to_datetime(df['time'])
-                df.set_index('time', inplace=True)
+    # 2. LẤY DỮ LIỆU LỊCH SỬ TỪ ENTRADE (ỔN ĐỊNH CHO CHART)
+    # Entrade API không chặn Streamlit và hỗ trợ nến Ngày (1D) chuẩn xác
+    try:
+        end_ts = int(time.time())
+        start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60)) # Lấy 3 năm
+        url_hist = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&from={start_ts}&to={end_ts}&resolution=1D"
+        
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(url_hist, headers=headers, timeout=10)
+        
+        if res.status_code == 200:
+            raw = res.json()
+            if 't' in raw and len(raw['t']) > 0:
+                df = pd.DataFrame({
+                    'time': pd.to_datetime(raw['t'], unit='s') + pd.Timedelta(hours=7),
+                    'open': raw['o'], 'high': raw['h'], 'low': raw['l'], 'close': raw['c'], 'volume': raw['v']
+                })
+                df.set_index('time', inplace=True); df.sort_index(inplace=True)
+                for c in ['open', 'high', 'low', 'close', 'volume']: 
+                    df[c] = pd.to_numeric(df[c], errors='coerce')
+                
+                # --- GHÉP NẾN REAL-TIME ---
+                # Lấy giá từ XNO (nếu có) để cập nhật vào nến cuối cùng
+                if 'realtime' in data and data['realtime'].get('price', 0) > 0:
+                    cur_p = data['realtime']['price']
+                    last_idx = df.index[-1]
+                    # Chỉ cập nhật nếu nến cuối cùng trùng với ngày hôm nay
+                    if last_idx.date() == datetime.now().date():
+                        df.at[last_idx, 'close'] = cur_p
+                        if cur_p > df.at[last_idx, 'high']: df.at[last_idx, 'high'] = cur_p
+                        if cur_p < df.at[last_idx, 'low']: df.at[last_idx, 'low'] = cur_p
+                
+                data["df"] = df[df['volume'] > 0]
             else:
-                # Trường hợp index đã là chuỗi thời gian
-                df.index = pd.to_datetime(df.index)
-
-            df.sort_index(inplace=True)
-            
-            # Ép kiểu số cho các cột quan trọng
-            for c in ['open', 'high', 'low', 'close', 'volume']: 
-                if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
-
-            # D. GHÉP NẾN REAL-TIME
-            # Nếu có giá hiện tại, update vào nến cuối cùng của ngày hôm nay
-            if 'realtime' in data and data['realtime'].get('price', 0) > 0:
-                cur_p = data['realtime']['price']
-                last_idx = df.index[-1]
-                
-                # Chỉ update nếu nến cuối trùng ngày hôm nay
-                if last_idx.date() == datetime.now().date():
-                    df.at[last_idx, 'close'] = cur_p
-                    if cur_p > df.at[last_idx, 'high']: df.at[last_idx, 'high'] = cur_p
-                    if cur_p < df.at[last_idx, 'low']: df.at[last_idx, 'low'] = cur_p
-                
-            data["df"] = df[df['volume'] > 0]
-            
-        except Exception as e:
-             data["error"] = f"Lỗi lấy lịch sử Quote: {str(e)}"
+                data["error"] = f"Không có dữ liệu lịch sử cho {symbol}"
+        else:
+             data["error"] = f"Lỗi tải dữ liệu Entrade: {res.status_code}"
 
     except Exception as e:
-        data["error"] = f"Lỗi XNO API Chung: {str(e)}"
+        data["error"] = f"Lỗi hệ thống: {str(e)}"
         
     return data
 # ---------------------------------------------------------
@@ -489,6 +476,7 @@ else:
             with col_ai:
                 st.markdown(render_ai_analysis(df, symbol), unsafe_allow_html=True)
         else: st.error(d["error"])
+
 
 
 
