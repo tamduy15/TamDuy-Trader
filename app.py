@@ -485,9 +485,19 @@ else:
                 for trend, color in [('POSITIVE', '#00E676'), ('NEGATIVE', '#f23645'), ('SIDEWAY', '#f0b90b')]:
                     tdf = df[df['Trend_Phase'] == trend]
                     if not tdf.empty: 
-                        fig.add_trace(go.Candlestick(
-                            x=tdf.index, open=tdf['open'], high=tdf['high'], low=tdf['low'], close=tdf['close'], 
-                            name=trend,
+                        # Tìm đoạn này trong code cũ và sửa lại các tham số open, high, low, close
+fig.add_trace(go.Candlestick(
+    x=tdf.index, 
+    open=tdf['HA_Open'],   # Thay open thường bằng HA_Open
+    high=tdf['HA_High'],   # Thay high thường bằng HA_High
+    low=tdf['HA_Low'],     # Thay low thường bằng HA_Low
+    close=tdf['HA_Close'], # Thay close thường bằng HA_Close
+    name=trend,
+    # Màu sắc chuẩn AmiBroker: Xanh lá (Tăng) - Đỏ (Giảm)
+    increasing_line_color='#00E676', increasing_fillcolor='#00E676', 
+    decreasing_line_color='#FF5252', decreasing_fillcolor='#FF5252',
+    hovertemplate='<b>Nến Heikin Ashi</b><br>Mở: %{open:,.2f}<br>Đóng: %{close:,.2f}<extra></extra>'
+), row=1, col=1)
                             # Tăng độ dày viền nến lên 2.0 để nhìn rõ hơn
                             increasing_line_color=color, increasing_fillcolor=color, increasing_line_width=2.0,
                             decreasing_line_color=color, decreasing_fillcolor=color, decreasing_line_width=2.0,
