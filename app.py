@@ -167,14 +167,3 @@ else:
 
         else: st.error(err)
 
-
-### Hướng dẫn cập nhật:
-
-1.  **Tạo file `indicators.py`:** Copy nội dung ở Bước 1, tạo file mới trong cùng thư mục với `app.py`. Đây là nơi chứa logic thông minh.
-2.  **Cập nhật `app.py`:** Copy nội dung ở Bước 2 dán đè vào file cũ.
-3.  **Chạy thử:**
-    * Nhập mã cổ phiếu (VD: `DIG`, `CEO`, `NVL` - những mã đầu cơ biến động mạnh sẽ thấy màu nến Flower hoạt động rất rõ).
-    * Bạn sẽ thấy nến **Xanh liên tục** trong đợt tăng giá (kể cả phiên chỉnh đỏ) và **Đỏ liên tục** trong đợt giảm giá (kể cả phiên hồi xanh). Đây chính là "đặc sản" của Amibroker.
-
-Bạn hãy thử nghiệm Tab 1 trước nhé. Nếu thấy màu nến đã chuẩn ý bạn ("Không phải nguyên tắc tăng giảm giá"), mình sẽ tiếp tục hoàn thiện 6 Tab còn lại!
-
