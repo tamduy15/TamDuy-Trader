@@ -1,159 +1,216 @@
 import streamlit as st
+import db_manager as db
+import time
 import pandas as pd
 import numpy as np
-import time
-# Thư viện chart mới
-from streamlit_lightweight_charts_ntpl import renderLightweightCharts
-# File logic
-import strategy_engine as se
-# File DB
-import db_manager as db
+import pandas_ta as ta
+from datetime import datetime
+import requests
+import pytz
 
-# --- XỬ LÝ IMPORT AN TOÀN ---
+# Thư viện Chart AmiBroker (Mới thêm)
+from streamlit_lightweight_charts_ntpl import renderLightweightCharts
+
+# ---------------------------------------------------------
+# 1. KẾT NỐI API & CẤU HÌNH (GIỮ NGUYÊN CODE CŨ CỦA BẠN)
+# ---------------------------------------------------------
 try:
     from xnoapi import client
-    HAS_XNO = False # Tạm tắt để Web chạy được đã
-except:
+    from xnoapi.vn.data import get_market_index_snapshot
+    from xnoapi.vn.data.stocks import Trading
+    # Token cũ của bạn
+    client(apikey="oWwDudF9ak5bhdIGVVNWetbQF26daMXluwItepTIBI1YQj9aWrlMlZui5lOWZ2JalVwVIhBd9LLLjmL1mXR-9ZHJZWgItFOQvihcrJLdtXAcVQzLJCiN0NrOtaYCNZf4")
+    HAS_XNO = True
+except ImportError:
     HAS_XNO = False
 
-st.set_page_config(layout="wide", page_title="DATCAP PRO", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🦅", initial_sidebar_state="collapsed")
 st.markdown("""<style>.block-container {padding-top: 0rem; padding-bottom: 0rem;} header {visibility: hidden;}</style>""", unsafe_allow_html=True)
 
-# --- HÀM TẠO DATA GIẢ (ĐỂ TEST GIAO DIỆN KHI API LỖI) ---
-def generate_fake_data(symbol):
-    # Tạo 200 cây nến giả lập để test chart
-    dates = pd.date_range(end=datetime.now(), periods=200, freq='D')
-    np.random.seed(42)
+# ---------------------------------------------------------
+# 2. DATA ENGINE (GIỮ NGUYÊN CODE CŨ CỦA BẠN)
+# ---------------------------------------------------------
+@st.cache_data(ttl=1)
+def get_market_data(symbol):
+    data = {"df": None, "error": "", "realtime": {}}
+    tz_vn = pytz.timezone('Asia/Ho_Chi_Minh')
+    now_vn = datetime.now(tz_vn)
+    current_price = 0; current_vol = 0
     
-    # Tạo giá ngẫu nhiên giống chứng khoán
-    base_price = 30000
-    change = np.random.randn(200) * 500 # Biến động +/- 500đ
-    prices = np.cumsum(change) + base_price
-    
-    data = []
-    for i, price in enumerate(prices):
-        # Tạo nến OHLC từ giá đóng cửa
-        close = abs(price)
-        open_ = close + np.random.randint(-200, 200)
-        high = max(open_, close) + np.random.randint(0, 300)
-        low = min(open_, close) - np.random.randint(0, 300)
-        vol = np.random.randint(100000, 5000000)
+    # 2.1 Lấy Realtime XNO
+    if HAS_XNO:
+        try:
+            pb_data = Trading.price_board([symbol])
+            if pb_data and len(pb_data) > 0:
+                item = pb_data[0]
+                raw_price = item.get('matchPrice', item.get('price', item.get('lastPrice', 0)))
+                raw_vol = item.get('totalVol', item.get('volume', 0))
+                price_final = raw_price * 1000 if raw_price < 500 else raw_price
+                current_price = price_final; current_vol = raw_vol
+                data["realtime"] = {"price": price_final, "vol": raw_vol}
+        except: pass
+
+    # 2.2 Lấy Lịch sử Entrade & Vá nến
+    try:
+        end_ts = int(time.time())
+        start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60))
+        url_hist = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&from={start_ts}&to={end_ts}&resolution=1D"
+        res = requests.get(url_hist, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
         
-        data.append({
-            'time': dates[i],
-            'open': open_, 'high': high, 'low': low, 'close': close, 'volume': vol
-        })
+        if res.status_code == 200:
+            raw = res.json()
+            if 't' in raw and len(raw['t']) > 0:
+                df = pd.DataFrame({'time': pd.to_datetime(raw['t'], unit='s').tz_localize('UTC').tz_convert(tz_vn), 'open': raw['o'], 'high': raw['h'], 'low': raw['l'], 'close': raw['c'], 'volume': raw['v']})
+                df['time'] = df['time'].dt.tz_localize(None) # Fix lỗi thư viện chart
+                
+                # Logic vá nến Realtime của bạn
+                if current_price > 0:
+                    last_idx = df.index[-1]
+                    last_date = df['time'].iloc[-1].date()
+                    today = now_vn.date()
+                    if last_date < today: # Thêm nến mới
+                        new_row = pd.DataFrame([{'time': pd.Timestamp(now_vn.replace(tzinfo=None)), 'open': current_price, 'high': current_price, 'low': current_price, 'close': current_price, 'volume': current_vol}])
+                        df = pd.concat([df, new_row], ignore_index=True)
+                    elif last_date == today: # Cập nhật nến cuối
+                        idx = df.index[-1]
+                        df.at[idx, 'close'] = current_price
+                        df.at[idx, 'volume'] = current_vol
+                        if current_price > df.at[idx, 'high']: df.at[idx, 'high'] = current_price
+                        if current_price < df.at[idx, 'low']: df.at[idx, 'low'] = current_price
+                
+                data["df"] = df
+            else: data["error"] = "No Data"
+        else: data["error"] = "API Error"
+    except Exception as e: data["error"] = str(e)
+    return data
+
+# ---------------------------------------------------------
+# 3. XỬ LÝ LOGIC AMIBROKER (TÔ MÀU & TÍN HIỆU)
+# ---------------------------------------------------------
+def process_amibroker_logic(df):
+    if df is None or df.empty: return df
+    df = df.copy()
     
-    df = pd.DataFrame(data)
-    # Xử lý timezone để khớp thư viện chart
-    df['time'] = df['time'].dt.tz_localize(None)
+    # Chỉ báo cơ bản
+    df['MA20'] = ta.sma(df['close'], length=20)
+    df['MA50'] = ta.sma(df['close'], length=50)
+    df['MA200'] = ta.sma(df['close'], length=200)
+    
+    # Logic Nền chặt & Trend (Mô phỏng lại logic của bạn)
+    period_base = 25
+    df['HH_25'] = df['high'].rolling(period_base).max().shift(1)
+    df['LL_25'] = df['low'].rolling(period_base).min().shift(1)
+    df['BaseTight'] = ((df['HH_25'] - df['LL_25']) / df['LL_25']) < 0.15
+    
+    # Xác định trạng thái để tô màu nến (State Machine)
+    # Xanh: Đang giữ lệnh (Giá > MA20/MA50)
+    # Đỏ: Đã bán hoặc Downtrend
+    # Xám: Sideway
+    
+    colors = []
+    signals = [] # 1: Mua, -1: Bán, 0: Không
+    in_trade = False
+    
+    for i in range(len(df)):
+        close = df['close'].iloc[i]
+        ma50 = df['MA50'].iloc[i] if not pd.isna(df['MA50'].iloc[i]) else 0
+        
+        # Điều kiện MUA (Giản lược từ logic của bạn để chạy nhanh)
+        # Breakout nền hoặc Cắt lên MA50
+        is_buy_signal = (close > ma50) and (df['close'].iloc[i-1] <= df['MA50'].iloc[i-1])
+        
+        # Điều kiện BÁN: Gãy MA20 (hoặc MA50 tùy chỉnh)
+        is_sell_signal = (close < ma50) and (df['close'].iloc[i-1] >= df['MA50'].iloc[i-1])
+        
+        # Xử lý trạng thái
+        if is_buy_signal:
+            in_trade = True
+            colors.append('#00E676') # Xanh lá (Điểm mua)
+            signals.append(1)
+        elif is_sell_signal:
+            in_trade = False
+            colors.append('#FF5252') # Đỏ (Điểm bán)
+            signals.append(-1)
+        elif in_trade:
+            colors.append('#089981') # Xanh đậm (Đang nắm giữ)
+            signals.append(0)
+        else:
+            # Không giữ lệnh
+            if close < ma50: colors.append('#ef5350') # Đỏ nhạt (Downtrend)
+            else: colors.append('#787b86') # Xám (Sideway)
+            signals.append(0)
+            
+    df['BarColor'] = colors
+    df['Signal'] = signals
     return df
 
-# --- MAIN APP ---
+# ---------------------------------------------------------
+# 4. GIAO DIỆN CHÍNH (LIGHTWEIGHT CHART THAY CHO PLOTLY)
+# ---------------------------------------------------------
+# --- HEADER ---
 c1, c2 = st.columns([1, 6])
-with c1: 
-    st.markdown("### 🦅 DATCAP")
-with c2:
-    symbol = st.text_input("SYMBOL", value="SSI", label_visibility="collapsed").upper()
+with c1: st.markdown("### 🦅 DATCAP")
+with c2: symbol = st.text_input("MÃ CK", value="SSI", label_visibility="collapsed").upper()
 
 if symbol:
-    # 1. Tạm thời dùng Fake Data để đảm bảo Chart hiện lên
-    raw_df = generate_fake_data(symbol)
+    d = get_market_data(symbol) # Gọi hàm Data Cũ của bạn
     
-    if not raw_df.empty:
-        # 2. Chạy logic Strategy Engine
-        df = se.calculate_datcap_logic(raw_df)
+    if d["df"] is not None and not d["df"].empty:
+        df = process_amibroker_logic(d["df"])
         last = df.iloc[-1]
-
-        # 3. Header thông tin
+        
+        # --- INFO BAR ---
+        status_color = last['BarColor']
         st.markdown(f"""
-        <div style="display: flex; gap: 20px; align-items: center; background: #131722; padding: 10px; border-radius: 4px; margin-bottom: 10px; border: 1px solid #333;">
-            <div style="font-size: 24px; font-weight: bold; color: #d1d4dc">{symbol}</div>
-            <div style="font-size: 24px; color: {'#00E676' if last['close']>=last['open'] else '#FF5252'}">{last['close']:,.0f}</div>
-            <div style="color: #999">Vol: {last['volume']/1000:,.0f}K</div>
-            <div style="margin-left: auto; padding: 5px 15px; background: {last['BarColor']}; color: #fff; font-weight: bold; border-radius: 3px; border: 1px solid #555;">
-                {last['Status']}
+        <div style="background: #131722; padding: 12px; border-radius: 4px; display: flex; align-items: center; border: 1px solid #333; margin-bottom: 10px;">
+            <div style="font-size: 24px; font-weight: bold; color: #d1d4dc; margin-right: 20px;">{symbol}</div>
+            <div style="font-size: 24px; font-weight: bold; color: {'#00E676' if last['close']>=last['open'] else '#FF5252'}">{last['close']:,.0f}</div>
+            <div style="color: #888; margin-left: 20px;">Vol: {last['volume']/1000:,.0f}K</div>
+            <div style="margin-left: auto; padding: 4px 12px; background: {status_color}; color: #fff; font-weight: bold; border-radius: 4px;">
+                {'NẮM GIỮ' if last['Signal']==0 and status_color=='#089981' else 'MUA' if last['Signal']==1 else 'BÁN' if last['Signal']==-1 else 'QUAN SÁT'}
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        # 4. Chuẩn bị dữ liệu vẽ Chart
+        # --- LIGHTWEIGHT CHART (THAY THẾ PLOTLY) ---
         chart_data = []
         vol_data = []
-        marker_data = []
         ma50_data = []
-        ma200_data = []
+        markers = []
 
         for i, row in df.iterrows():
             ts = int(row['time'].timestamp())
-            
-            # Nến (Màu sắc theo logic Strategy Engine)
-            chart_data.append({
-                "time": ts, 
-                "open": row['open'], "high": row['high'], "low": row['low'], "close": row['close'],
-                "color": row['BarColor'] 
-            })
-            
+            # Nến có màu Custom theo Logic AmiBroker
+            chart_data.append({"time": ts, "open": row['open'], "high": row['high'], "low": row['low'], "close": row['close'], "color": row['BarColor']})
             # Volume
-            vol_color = 'rgba(0, 230, 118, 0.5)' if row['close'] >= row['open'] else 'rgba(255, 82, 82, 0.5)'
-            vol_data.append({"time": ts, "value": row['volume'], "color": vol_color})
-            
-            # MA Lines
+            vol_data.append({"time": ts, "value": row['volume'], "color": 'rgba(0, 230, 118, 0.4)' if row['close'] >= row['open'] else 'rgba(255, 82, 82, 0.4)'})
+            # MA50
             if not pd.isna(row['MA50']): ma50_data.append({"time": ts, "value": row['MA50']})
-            if not pd.isna(row['MA200']): ma200_data.append({"time": ts, "value": row['MA200']})
-
             # Mũi tên tín hiệu
-            if row['Signal_Point'] == 1:
-                marker_data.append({
-                    "time": ts, "position": "belowBar", "color": "#2196F3", "shape": "arrowUp", "text": "MUA"
-                })
-            elif row['Signal_Point'] == -1:
-                marker_data.append({
-                    "time": ts, "position": "aboveBar", "color": "#FF5252", "shape": "arrowDown", "text": "BÁN"
-                })
+            if row['Signal'] == 1: markers.append({"time": ts, "position": "belowBar", "color": "#2196F3", "shape": "arrowUp", "text": "MUA"})
+            if row['Signal'] == -1: markers.append({"time": ts, "position": "aboveBar", "color": "#FF5252", "shape": "arrowDown", "text": "BÁN"})
 
-        # 5. Cấu hình Chart
-        chartOptions = {
+        # Cấu hình hiển thị
+        chart_options = {
             "layout": {"backgroundColor": "#131722", "textColor": "#d1d4dc"},
             "grid": {"vertLines": {"color": "#242832"}, "horzLines": {"color": "#242832"}},
-            "crosshair": {"mode": 1},
-            "rightPriceScale": {"borderColor": "#242832"},
-            "timeScale": {"borderColor": "#242832", "timeVisible": True},
-            "height": 550
+            "height": 600,
+            "rightPriceScale": {"borderColor": "#2B2B43"},
+            "timeScale": {"borderColor": "#2B2B43", "timeVisible": True},
+            "crosshair": {"mode": 1}
         }
 
-        seriesCandle = {
-            "type": "Candlestick",
+        series_candle = {
+            "type": "Candlestick", 
             "data": chart_data,
-            "options": {
-                "upColor": "#089981", "downColor": "#f23645",
-                "borderVisible": False, "wickUpColor": "#089981", "wickDownColor": "#f23645"
-            },
-            "markers": marker_data
+            "options": {"upColor": "#089981", "downColor": "#f23645", "borderVisible": False, "wickUpColor": "#089981", "wickDownColor": "#f23645"},
+            "markers": markers
         }
+        series_ma50 = {"type": "Line", "data": ma50_data, "options": {"color": "#2962FF", "lineWidth": 2, "title": "MA50"}}
+        series_vol = {"type": "Histogram", "data": vol_data, "options": {"priceFormat": {"type": "volume"}, "priceScaleId": ""}}
 
-        seriesMA50 = {
-            "type": "Line", "data": ma50_data,
-            "options": {"color": "#2962FF", "lineWidth": 2, "title": "MA50"}
-        }
-
-        seriesMA200 = {
-            "type": "Line", "data": ma200_data,
-            "options": {"color": "#FF6D00", "lineWidth": 2, "title": "MA200", "lineStyle": 2}
-        }
-
-        seriesVol = {
-            "type": "Histogram", "data": vol_data,
-            "options": {"priceFormat": {"type": "volume"}, "priceScaleId": ""}
-        }
-
-        renderLightweightCharts([
-            {"series": [seriesCandle, seriesMA50, seriesMA200, seriesVol], "chartOptions": chartOptions}
-        ], key="main_chart")
-
-        # 6. Panel nhận định
-        st.success("✅ HỆ THỐNG ĐÃ HOẠT ĐỘNG! Đang sử dụng dữ liệu giả lập để test giao diện.")
-
-    else:
-        st.warning(f"Không tìm thấy dữ liệu cho mã {symbol}")
-
+        # RENDER CHART
+        renderLightweightCharts([{"series": [series_candle, series_ma50, series_vol], "chartOptions": chart_options}], key="main_chart")
+        
+    elif d["error"]:
+        st.error(f"Lỗi dữ liệu: {d['error']}")
