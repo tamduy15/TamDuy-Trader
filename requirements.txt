@@ -2,7 +2,6 @@ streamlit
 pandas
 numpy
 requests
-pytz
 pandas_ta
 streamlit-lightweight-charts-ntpl
 gspread
