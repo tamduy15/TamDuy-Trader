@@ -6,15 +6,15 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
-import indicators as ind # Import file tính toán mới
+import indicators as ind # Import file indicators.py vừa tạo
 
 # ---------------------------------------------------------
-# 1. CẤU HÌNH
+# 1. CẤU HÌNH TRANG
 # ---------------------------------------------------------
 st.set_page_config(page_title="TAMDUY TRADER PRO", layout="wide", page_icon="🦅", initial_sidebar_state="collapsed")
 db.init_db()
 
-# CSS Tùy chỉnh (Giữ nguyên style Dark Mode xịn xò)
+# CSS Tùy chỉnh (Dark Mode & TradingView Style)
 st.markdown("""
 <style>
     .stApp {background-color: #000000; color: #e0e0e0;}
@@ -23,14 +23,38 @@ st.markdown("""
     .hud-val {font-family: 'Roboto Mono', monospace; font-size: 20px; font-weight: bold; color: #fff;}
     .hud-lbl {font-size: 11px; color: #888; text-transform: uppercase;}
     .stTabs [aria-selected="true"] {background-color: #d4af37 !important; color: #000 !important; font-weight: bold;}
+    
+    /* Insight Box Style */
+    .insight-container {
+        background-color: #161b22; 
+        border: 1px solid #30363d; 
+        border-left: 5px solid #d4af37;
+        padding: 15px; 
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    .insight-title {color: #58a6ff; font-weight: bold; font-size: 16px; margin-bottom: 8px; text-transform: uppercase;}
+    .insight-text {font-size: 14px; line-height: 1.6;}
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. DATA ENGINE (DNSE API)
+# 2. DATA ENGINE
 # ---------------------------------------------------------
 @st.cache_data(ttl=5)
-def get_data(symbol):
+def get_stock_data(symbol):
+    """Lấy dữ liệu giá và thông tin cơ bản"""
+    data = {"df": None, "name": symbol, "error": ""}
+    
+    # 1. Lấy tên công ty (Dùng API VNDirect public)
+    try:
+        url_profile = f"https://finfo-api.vndirect.com.vn/v4/stocks?q=code:{symbol}"
+        res_p = requests.get(url_profile, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        if res_p.status_code == 200 and len(res_p.json()['data']) > 0:
+            data["name"] = res_p.json()['data'][0]['companyName']
+    except: pass
+
+    # 2. Lấy dữ liệu giá (Entrade/DNSE)
     try:
         end_ts = int(time.time())
         start_ts = int(end_ts - (3 * 365 * 24 * 60 * 60))
@@ -43,23 +67,83 @@ def get_data(symbol):
                                    'open': raw['o'], 'high': raw['h'], 'low': raw['l'], 'close': raw['c'], 'volume': raw['v']})
                 df.set_index('time', inplace=True); df.sort_index(inplace=True)
                 for c in ['open','high','low','close','volume']: df[c] = pd.to_numeric(df[c], errors='coerce')
-                return df[df['volume'] > 0], None
-        return None, "Không có dữ liệu"
-    except Exception as e: return None, str(e)
+                data["df"] = df[df['volume'] > 0]
+            else: data["error"] = f"Mã {symbol} không có dữ liệu giao dịch."
+        else: data["error"] = "Lỗi kết nối API giá."
+    except Exception as e: data["error"] = str(e)
+    
+    return data
 
 # ---------------------------------------------------------
-# 3. GIAO DIỆN CHÍNH
+# 3. NHẬN ĐỊNH THÔNG MINH (THEO BỘ QUY TẮC)
 # ---------------------------------------------------------
+def render_insight_panel(df, symbol, company_name):
+    last = df.iloc[-1]
+    
+    # 1. Xác định màu nến (Xu hướng Flower)
+    trend_color = last['trend_color'] # 1: Xanh, -1: Đỏ
+    trend_status = "TÍCH CỰC (UPTREND)" if trend_color == 1 else "TIÊU CỰC (DOWNTREND)"
+    trend_css = "color: #00E676;" if trend_color == 1 else "color: #FF5252;"
+    
+    # 2. Tín hiệu Mua/Bán
+    signal = "NẮM GIỮ / QUAN SÁT"
+    sig_color = "#E0E0E0"
+    
+    if last['Breakout']: 
+        signal = "MUA GIA TĂNG (BREAKOUT)"
+        sig_color = "#00E676" # Xanh lá
+    elif last['Pocket_Pivot']:
+        signal = "MUA SỚM (POCKET PIVOT)"
+        sig_color = "#FFD600" # Vàng
+    elif last['Sell_Signal']:
+        signal = "BÁN / HẠ TỶ TRỌNG"
+        sig_color = "#FF5252" # Đỏ
+
+    # 3. Hành động giá
+    price_change = last['close'] - df.iloc[-2]['close']
+    pct_change = (price_change / df.iloc[-2]['close']) * 100
+    p_color = "#00E676" if price_change >= 0 else "#FF5252"
+
+    html = f"""
+    <div class='insight-container'>
+        <div class='insight-title'>🦅 NHẬN ĐỊNH CỔ PHIẾU: {symbol}</div>
+        <div style='font-size: 18px; font-weight: bold; margin-bottom: 10px; color: #FFF;'>
+            {company_name}
+        </div>
+        <div class='insight-text'>
+            <p><b>1. TRẠNG THÁI XU HƯỚNG (FLOWER):</b><br>
+            Hiện tại cổ phiếu đang trong trạng thái <span style='{trend_css} font-weight:bold;'>{trend_status}</span>. 
+            {'Nến màu XANH thể hiện phe Mua đang kiểm soát.' if trend_color==1 else 'Nến màu ĐỎ thể hiện áp lực Bán vẫn còn mạnh.'}</p>
+            
+            <p><b>2. TÍN HIỆU HỆ THỐNG:</b><br>
+            Khuyến nghị hiện tại: <span style='color:{sig_color}; font-weight:bold; font-size: 15px;'>{signal}</span>.<br>
+            Giá đóng cửa: <span style='color:{p_color}'>{last['close']:,.0f} ({pct_change:+.2f}%)</span>.</p>
+            
+            <p><b>3. VÙNG HÀNH ĐỘNG:</b><br>
+            - Hỗ trợ cứng (Stoploss): <b style='color:#FF5252'>{last['SL']:,.0f}</b><br>
+            - Mục tiêu kỳ vọng (Target): <b style='color:#00E676'>{last['T1']:,.0f}</b></p>
+            
+            <div style='margin-top: 10px; font-style: italic; border-top: 1px dashed #555; padding-top: 5px;'>
+                "Tuân thủ kỷ luật: Chỉ mua khi Nến Xanh + Mũi tên Báo Mua. Tuyệt đối không bắt đáy khi Nến Đỏ."
+            </div>
+        </div>
+    </div>
+    """
+    return html
+
+# ---------------------------------------------------------
+# 4. GIAO DIỆN CHÍNH
+# ---------------------------------------------------------
+# --- LOGIN CHECK ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if st.session_state.logged_in and not db.check_token_valid(st.session_state.username, st.session_state.token):
     st.session_state.logged_in = False; st.rerun()
 
-# --- LOGIN FORM ---
 if not st.session_state.logged_in:
-    # (Phần code login giữ nguyên như cũ cho gọn)
-    c1,c2,c3 = st.columns([1,1,1])
+    # Màn hình đăng nhập
+    c1, c2, c3 = st.columns([1, 1, 1])
     with c2:
-        st.title("TAMDUY CAPITAL")
+        st.markdown("<br><h1 style='text-align: center; color: #d4af37;'>TAMDUY CAPITAL</h1>", unsafe_allow_html=True)
         with st.form("login"):
             u = st.text_input("User"); p = st.text_input("Pass", type="password")
             if st.form_submit_button("LOGIN"):
@@ -68,102 +152,94 @@ if not st.session_state.logged_in:
                     st.session_state.update(logged_in=True, username=u, name=res["name"], role=res["role"], token=res["token"])
                     st.rerun()
                 else: st.error(res["msg"])
-
-# --- MAIN DASHBOARD ---
 else:
-    # Header
-    c1, c2, c3, c4 = st.columns([1, 2, 4, 1])
+    # --- DASHBOARD ---
+    # Header & Input
+    c1, c2, c3 = st.columns([1, 3, 1])
     with c1: st.markdown("### 🦅 PRO")
-    with c2: symbol = st.text_input("MÃ", "", label_visibility="collapsed", placeholder="Mã CK...").upper()
-    with c4: 
-        if st.button("EXIT"): st.session_state.logged_in = False; st.rerun()
-    st.markdown("---")
+    with c2: 
+        # Ô nhập mã + Tên công ty sẽ hiện bên dưới sau khi nhập
+        symbol_input = st.text_input("MÃ CỔ PHIẾU", "", label_visibility="collapsed", placeholder="Nhập mã (VD: HPG)...").upper()
+    with c3: 
+        if st.button("LOGOUT"): st.session_state.logged_in = False; st.rerun()
 
-    if symbol:
-        df, err = get_data(symbol)
-        if df is not None:
-            # TÍNH TOÁN CHỈ BÁO (GỌI TỪ MODULE MỚI)
-            df = ind.calculate_wyckoff_vsa(df)
-            trend_color, trading_line, signal_line = ind.calculate_flower_indicator(df)
+    if symbol_input:
+        data = get_stock_data(symbol_input)
+        
+        if not data["error"]:
+            df = data["df"]
+            # Tính toán Full Chỉ báo
+            df = ind.calculate_full_indicators(df)
             last = df.iloc[-1]
             
-            # --- HUD ---
-            k1, k2, k3, k4 = st.columns(4)
-            p_col = "#00E676" if last['close']>=last['open'] else "#FF5252"
-            k1.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{p_col}'>{last['close']:,.2f}</div><div class='hud-lbl'>GIÁ</div></div>", unsafe_allow_html=True)
-            
-            # Tín hiệu Flower
-            flower_st = "TÍCH CỰC (XANH)" if trend_color[-1] == 1 else "TIÊU CỰC (ĐỎ)"
-            f_col = "#00E676" if trend_color[-1] == 1 else "#FF5252"
-            k2.markdown(f"<div class='hud-box'><div class='hud-val' style='color:{f_col}'>{flower_st}</div><div class='hud-lbl'>XU HƯỚNG FLOWER</div></div>", unsafe_allow_html=True)
+            # --- TÊN CÔNG TY (HIỆN DƯỚI INPUT) ---
+            st.markdown(f"<div style='text-align:center; color:#888; margin-top:-15px; margin-bottom:10px;'>{data['name']}</div>", unsafe_allow_html=True)
 
-            # --- TABS LAYOUT (7 TABS CHUẨN AMIBROKER) ---
-            tabs = st.tabs([
-                "TAB 1: TÍN HIỆU TỔNG HỢP", 
-                "TAB 2: TARGET/STOPLOSS",
-                "TAB 3: VPA VOLUME",
-                "TAB 4: TRENDLINE",
-                "TAB 5: BOLLINGER",
-                "TAB 6: ICHIMOKU",
-                "TAB 7: RSI-MACD"
-            ])
+            # --- KHUNG NHẬN ĐỊNH (INSIGHT) ---
+            st.markdown(render_insight_panel(df, symbol_input, data['name']), unsafe_allow_html=True)
+            
+            # --- 8 TABS PHÂN TÍCH ---
+            # Danh sách 8 Tab như yêu cầu
+            tab_names = [
+                "TỔNG HỢP TÍN HIỆU", "TARGET/STOPLOSS", "VPA & TÍN HIỆU", 
+                "TRENDLINE", "BOLLINGER BANDS", "ICHIMOKU", 
+                "RSI & MACD", "TÀI CHÍNH & HỒ SƠ"
+            ]
+            tabs = st.tabs(tab_names)
             
             # === TAB 1: TỔNG HỢP (Nến Flower + Tín hiệu) ===
             with tabs[0]:
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.75, 0.25], vertical_spacing=0.02)
                 
-                # 1. Vẽ Nến Flower (Xanh/Đỏ theo xu hướng, KHÔNG theo giá tăng giảm)
-                # Tách data thành 2 nhóm màu
-                idx_green = np.where(trend_color == 1)[0]
-                idx_red = np.where(trend_color == -1)[0]
+                # Logic màu nến Flower
+                colors = ['#00E676' if x == 1 else '#FF1744' for x in df['trend_color']]
                 
-                # Nến Xanh (Trend Tăng)
-                if len(idx_green) > 0:
-                    df_g = df.iloc[idx_green]
+                # Vẽ nến (Dùng Loop để tô màu từng cây nến theo Trend Color thay vì giá đóng cửa)
+                # Tuy nhiên để hiệu năng tốt, ta dùng trick: 
+                # Vẽ 2 lớp nến: Lớp Xanh (cho trend tăng) và Lớp Đỏ (cho trend giảm)
+                
+                df_up = df[df['trend_color'] == 1]
+                df_down = df[df['trend_color'] == -1]
+                
+                if not df_up.empty:
                     fig.add_trace(go.Candlestick(
-                        x=df_g.index, open=df_g['open'], high=df_g['high'], low=df_g['low'], close=df_g['close'],
-                        name='Trend Tăng',
-                        increasing_line_color='#00E676', increasing_fillcolor='#00E676',
-                        decreasing_line_color='#006400', decreasing_fillcolor='#006400' # Giảm trong trend tăng vẫn xanh đậm
+                        x=df_up.index, open=df_up['open'], high=df_up['high'], low=df_up['low'], close=df_up['close'],
+                        name='Trend Tăng', increasing_line_color='#00E676', decreasing_line_color='#006400'
+                    ), row=1, col=1)
+                    
+                if not df_down.empty:
+                    fig.add_trace(go.Candlestick(
+                        x=df_down.index, open=df_down['open'], high=df_down['high'], low=df_down['low'], close=df_down['close'],
+                        name='Trend Giảm', increasing_line_color='#B71C1C', decreasing_line_color='#FF1744'
                     ), row=1, col=1)
                 
-                # Nến Đỏ (Trend Giảm)
-                if len(idx_red) > 0:
-                    df_r = df.iloc[idx_red]
-                    fig.add_trace(go.Candlestick(
-                        x=df_r.index, open=df_r['open'], high=df_r['high'], low=df_r['low'], close=df_r['close'],
-                        name='Trend Giảm',
-                        increasing_line_color='#B71C1C', increasing_fillcolor='#B71C1C', # Tăng trong trend giảm vẫn đỏ đậm
-                        decreasing_line_color='#FF1744', decreasing_fillcolor='#FF1744'
-                    ), row=1, col=1)
-                
-                # 2. Vẽ Mũi tên Tín hiệu (Wyckoff & Pocket Pivot)
-                buys = df[df['Signal_Wyckoff'] | df['Signal_Pocket']]
+                # Mũi tên Mua (Breakout)
+                buys = df[df['Breakout']]
                 if not buys.empty:
-                    fig.add_trace(go.Scatter(
-                        x=buys.index, y=buys['low']*0.98,
-                        mode='markers+text', marker=dict(symbol='triangle-up', size=14, color='#FFFF00'),
-                        text="MUA", textposition="bottom center", name='Signal'
-                    ), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.98, mode='markers', marker=dict(symbol='triangle-up', size=15, color='cyan'), name='Breakout'), row=1, col=1)
                 
-                # 3. Volume
-                colors_vol = ['#00E676' if c==1 else '#FF5252' for c in trend_color]
-                fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=colors_vol, name='Volume'), row=2, col=1)
+                # Mũi tên Vàng (Pocket Pivot)
+                pockets = df[df['Pocket_Pivot']]
+                if not pockets.empty:
+                    fig.add_trace(go.Scatter(x=pockets.index, y=pockets['low']*0.98, mode='markers', marker=dict(symbol='triangle-up', size=12, color='yellow'), name='Pocket Pivot'), row=1, col=1)
 
+                # Volume
+                fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=colors, name='Volume'), row=2, col=1)
+                
                 # Zoom 3 tháng
                 if len(df) > 90:
                     fig.update_xaxes(range=[df.index[-90], df.index[-1]+timedelta(days=2)])
-
+                    
                 fig.update_layout(height=700, paper_bgcolor='#000', plot_bgcolor='#000', showlegend=False, xaxis_rangeslider_visible=False, margin=dict(l=0,r=50,t=10,b=0))
                 st.plotly_chart(fig, use_container_width=True)
 
-            # === CÁC TAB KHÁC (Placeholder - Sẽ code tiếp) ===
-            with tabs[1]: st.info("Đang xây dựng: Target / Stoploss Chart (Theo logic Trailing Stop)")
-            with tabs[2]: st.info("Đang xây dựng: VPA Chart (Spread & Volume Analysis)")
-            with tabs[3]: st.info("Đang xây dựng: Trendline Auto")
-            with tabs[4]: st.info("Đang xây dựng: Bollinger + Keltner")
-            with tabs[5]: st.info("Đang xây dựng: Ichimoku Full")
-            with tabs[6]: st.info("Đang xây dựng: RSI / MACD / Gap")
+            # === CÁC TAB KHÁC (Placeholder - Bạn có thể yêu cầu code chi tiết từng tab sau) ===
+            with tabs[1]: st.info("Biểu đồ Target/Stoploss đang cập nhật...")
+            with tabs[2]: st.info("Biểu đồ VPA đang cập nhật...")
+            with tabs[3]: st.info("Biểu đồ Trendline đang cập nhật...")
+            with tabs[4]: st.info("Biểu đồ Bollinger Bands đang cập nhật...")
+            with tabs[5]: st.info("Biểu đồ Ichimoku đang cập nhật...")
+            with tabs[6]: st.info("Biểu đồ RSI/MACD đang cập nhật...")
+            with tabs[7]: st.info(f"Hồ sơ tài chính của {data['name']} đang cập nhật...")
 
-        else: st.error(err)
-
+        else: st.error(data["error"])
