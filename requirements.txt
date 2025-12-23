@@ -1,9 +1,11 @@
-streamlit==1.32.0
+xnoapi
+streamlit
 pandas
-numpy
-requests
+numpy<2.0.0
 pandas_ta
-streamlit-lightweight-charts-ntpl
-gspread
-google-auth
 plotly
+requests
+pytz
+gspread
+oauth2client
+streamlit-lightweight-charts-ntpl
