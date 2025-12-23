@@ -2,13 +2,19 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import time
-from datetime import datetime, timedelta
-# Thư viện biểu đồ
+# Thư viện chart mới
 from streamlit_lightweight_charts_ntpl import renderLightweightCharts
-# Import file logic
+# File logic
 import strategy_engine as se
-# Import db
+# File DB
 import db_manager as db
+
+# --- XỬ LÝ IMPORT AN TOÀN ---
+try:
+    from xnoapi import client
+    HAS_XNO = False # Tạm tắt để Web chạy được đã
+except:
+    HAS_XNO = False
 
 st.set_page_config(layout="wide", page_title="DATCAP PRO", initial_sidebar_state="collapsed")
 st.markdown("""<style>.block-container {padding-top: 0rem; padding-bottom: 0rem;} header {visibility: hidden;}</style>""", unsafe_allow_html=True)
@@ -150,3 +156,4 @@ if symbol:
 
     else:
         st.warning(f"Không tìm thấy dữ liệu cho mã {symbol}")
+
