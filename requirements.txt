@@ -3,12 +3,8 @@ pandas
 numpy
 requests
 pytz
-# Thư viện tính toán kỹ thuật
 pandas_ta
-# Thư viện biểu đồ giống AmiBroker (Cái này quan trọng)
 streamlit-lightweight-charts-ntpl
-# Các thư viện cũ của bạn (giữ lại để không lỗi db_manager)
 gspread
 google-auth
-xnoapi
 plotly
