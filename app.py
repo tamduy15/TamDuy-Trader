@@ -240,9 +240,3 @@ else:
                 with tabs[7]: st.info("Hồ sơ tài chính")
 
         else: st.error(data["error"])
-```
-
-**Cách sửa lỗi `KeyError: BBU_20_2.0`:**
-Trong file `indicators.py` mới, tôi đã thêm logic tự động tìm tên cột:
-```python
-upper_col = next((c for c in cols if c.startswith('BBU')), None)
