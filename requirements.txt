@@ -1,11 +1,10 @@
-xnoapi
 streamlit
 pandas
 numpy<2.0.0
-pandas_ta
-plotly
 requests
-pytz
-gspread
-oauth2client
+pandas_ta
 streamlit-lightweight-charts-ntpl
+gspread
+google-auth
+plotly
+protobuf
