@@ -2,47 +2,46 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import time
-# Thư viện biểu đồ mới
+from datetime import datetime, timedelta
+# Thư viện biểu đồ
 from streamlit_lightweight_charts_ntpl import renderLightweightCharts
-# Import file logic vừa tạo
+# Import file logic
 import strategy_engine as se
-# Import file DB cũ của bạn (vẫn giữ nguyên file db_manager.py trong repo nhé)
+# Import db
 import db_manager as db
-
-# --- SETUP ---
-try:
-    from xnoapi import client
-    # Đoạn này giữ code cũ của bạn nếu cần
-    HAS_XNO = False # Tạm tắt để test giao diện trước, bật lại sau
-except: HAS_XNO = False
 
 st.set_page_config(layout="wide", page_title="DATCAP PRO", initial_sidebar_state="collapsed")
 st.markdown("""<style>.block-container {padding-top: 0rem; padding-bottom: 0rem;} header {visibility: hidden;}</style>""", unsafe_allow_html=True)
 
-# --- DATA FAKE ĐỂ TEST (VÌ CHƯA CÓ API TRÊN CLOUD) ---
-@st.cache_data(ttl=60) 
-def get_data_test(symbol):
-    # Lấy dữ liệu free từ Entrade public API để test logic
-    import requests
-    end = int(time.time())
-    start = end - 30*24*60*60*24 # 2 năm
-    url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&from={start}&to={end}&resolution=1D"
+# --- HÀM TẠO DATA GIẢ (ĐỂ TEST GIAO DIỆN KHI API LỖI) ---
+def generate_fake_data(symbol):
+    # Tạo 200 cây nến giả lập để test chart
+    dates = pd.date_range(end=datetime.now(), periods=200, freq='D')
+    np.random.seed(42)
     
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        res = requests.get(url, headers=headers, timeout=10).json()
-        if 't' not in res or not res['t']: return pd.DataFrame()
+    # Tạo giá ngẫu nhiên giống chứng khoán
+    base_price = 30000
+    change = np.random.randn(200) * 500 # Biến động +/- 500đ
+    prices = np.cumsum(change) + base_price
+    
+    data = []
+    for i, price in enumerate(prices):
+        # Tạo nến OHLC từ giá đóng cửa
+        close = abs(price)
+        open_ = close + np.random.randint(-200, 200)
+        high = max(open_, close) + np.random.randint(0, 300)
+        low = min(open_, close) - np.random.randint(0, 300)
+        vol = np.random.randint(100000, 5000000)
         
-        df = pd.DataFrame({
-            'time': pd.to_datetime(res['t'], unit='s'), 
-            'open': res['o'], 'high': res['h'], 'low': res['l'], 'close': res['c'], 'volume': res['v']
+        data.append({
+            'time': dates[i],
+            'open': open_, 'high': high, 'low': low, 'close': close, 'volume': vol
         })
-        # Quan trọng: Remove timezone để khớp với Lightweight Chart
-        df['time'] = df['time'].dt.tz_localize(None)
-        return df
-    except Exception as e:
-        st.error(f"Lỗi lấy data: {e}")
-        return pd.DataFrame()
+    
+    df = pd.DataFrame(data)
+    # Xử lý timezone để khớp thư viện chart
+    df['time'] = df['time'].dt.tz_localize(None)
+    return df
 
 # --- MAIN APP ---
 c1, c2 = st.columns([1, 6])
@@ -52,8 +51,8 @@ with c2:
     symbol = st.text_input("SYMBOL", value="SSI", label_visibility="collapsed").upper()
 
 if symbol:
-    # 1. Lấy dữ liệu
-    raw_df = get_data_test(symbol)
+    # 1. Tạm thời dùng Fake Data để đảm bảo Chart hiện lên
+    raw_df = generate_fake_data(symbol)
     
     if not raw_df.empty:
         # 2. Chạy logic Strategy Engine
@@ -80,13 +79,13 @@ if symbol:
         ma200_data = []
 
         for i, row in df.iterrows():
-            ts = int(row['time'].timestamp()) # Time Unix
+            ts = int(row['time'].timestamp())
             
-            # Nến
+            # Nến (Màu sắc theo logic Strategy Engine)
             chart_data.append({
                 "time": ts, 
                 "open": row['open'], "high": row['high'], "low": row['low'], "close": row['close'],
-                "color": row['BarColor'] # <-- MÀU SẮC THEO TRẠNG THÁI
+                "color": row['BarColor'] 
             })
             
             # Volume
@@ -142,14 +141,12 @@ if symbol:
             "options": {"priceFormat": {"type": "volume"}, "priceScaleId": ""}
         }
 
-        # Render Chart
         renderLightweightCharts([
             {"series": [seriesCandle, seriesMA50, seriesMA200, seriesVol], "chartOptions": chartOptions}
         ], key="main_chart")
 
         # 6. Panel nhận định
-        trend_txt = "UPTREND" if last['close'] > last['MA200'] else "DOWNTREND"
-        st.info(f"Hệ thống DATCAP: Xu hướng **{trend_txt}**. Trạng thái **{last['Status']}**. RSI: {last['RSI']:.1f}")
+        st.success("✅ HỆ THỐNG ĐÃ HOẠT ĐỘNG! Đang sử dụng dữ liệu giả lập để test giao diện.")
 
     else:
         st.warning(f"Không tìm thấy dữ liệu cho mã {symbol}")
