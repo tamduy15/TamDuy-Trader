@@ -8,3 +8,4 @@ requests
 pytz
 gspread
 oauth2client
+streamlit-lightweight-charts-ntpl
