@@ -4,49 +4,37 @@ import pandas_ta as ta
 
 def calculate_flower_indicator(df, smoother=5):
     """
-    Tính toán chỉ báo Flower (Hoa Loa Kèn) để tô màu nến.
-    Chuyển đổi từ AFL: trading = ( hlc2 - emaHLC2 ) / stDevHLC2;
+    Chỉ báo Flower (Hoa Loa Kèn) để tô màu nến xu hướng
     """
     df = df.copy()
-    
-    # 1. Tính HLC2 (Trung bình giá)
-    # Amibroker: hlc2 = (High + Low + Close) / 3 (Thông thường)
-    # Tuy nhiên, một số bản Flower dùng (Open+High+Low+Close)/4.
-    # Ta dùng (H+L+C)/3 cho phổ biến.
+    # HLC3
     hlc3 = (df['high'] + df['low'] + df['close']) / 3
     
-    # 2. Tính EMA của HLC
-    # Trong code gốc không ghi rõ chu kỳ EMA, thường là 20 hoặc 34. 
-    # Ta chọn 20 để nhạy với ngắn hạn.
+    # EMA & StDev
     ema_hlc = ta.ema(hlc3, length=20)
-    
-    # 3. Tính độ lệch chuẩn (StDev)
     stdev_hlc = ta.stdev(hlc3, length=20)
     
-    # 4. Tính đường Trading (Dao động)
+    # Trading Line
     # Tránh chia cho 0
     stdev_hlc = stdev_hlc.replace(0, 0.0001)
-    trading = (hlc3 - ema_hlc) / stdev_hlc
+    df['flower_trading'] = (hlc3 - ema_hlc) / stdev_hlc
     
-    # 5. Tính đường Signal (Làm mượt Trading)
-    signal_trading = ta.ema(trading, length=smoother)
+    # Signal Line
+    df['flower_signal'] = ta.ema(df['flower_trading'], length=smoother)
     
-    # 6. Xác định Màu Nến (Trend Color)
-    # Xanh (1) nếu Trading > Signal, Đỏ (-1) nếu ngược lại
-    # Logic ngoại lệ: Ref(oo, -1) < oo... (Nến đảo chiều) -> Cái này hơi phức tạp để mô phỏng 100%
-    # Ta dùng logic chính: Trading > Signal
+    # Trend Color: 1 (Green/Up), -1 (Red/Down)
+    # Nguyên tắc: Trading > Signal => Uptrend (Xanh)
+    df['trend_color'] = np.where(df['flower_trading'] > df['flower_signal'], 1, -1)
     
-    trend_color = np.where(trading > signal_trading, 1, -1) # 1: Xanh, -1: Đỏ
-    
-    return trend_color, trading, signal_trading
+    return df
 
 def calculate_wyckoff_vsa(df):
     """
-    Tính toán các điểm mua Wyckoff và Pocket Pivot
+    Tính toán tín hiệu Mua/Bán theo Wyckoff và VSA
     """
     df = df.copy()
     
-    # MA Lines
+    # 1. Các đường MA
     df['MA10'] = ta.sma(df['close'], length=10)
     df['MA20'] = ta.sma(df['close'], length=20)
     df['MA50'] = ta.sma(df['close'], length=50)
@@ -54,31 +42,67 @@ def calculate_wyckoff_vsa(df):
     df['MA200'] = ta.sma(df['close'], length=200)
     df['AvgVol'] = ta.sma(df['volume'], length=50)
     
-    # 1. Trend Filter
-    trend_strong = (df['close'] > df['MA50']) & (df['MA50'] > df['MA150']) & (df['MA150'] > df['MA200'])
-    
-    # 2. Wyckoff Base (Nền giá)
+    # 2. Wyckoff: Nền giá chặt (Base Tight)
     period = 20
-    hhv = df['high'].rolling(period).max().shift(1)
-    llv = df['low'].rolling(period).min()
-    base_tight = np.where(llv > 0, (hhv - llv) / llv < 0.15, False) # Nền chặt < 15%
+    df['HHV_20'] = df['high'].rolling(period).max().shift(1)
+    df['LLV_20'] = df['low'].rolling(period).min()
+    # Độ biến động nền < 15%
+    base_change = (df['HHV_20'] - df['LLV_20']) / df['LLV_20']
+    df['Base_Tight'] = np.where(df['LLV_20']>0, base_change < 0.15, False)
     
-    # Breakout
-    breakout = (df['close'] > hhv) & (df['volume'] > 1.3 * df['AvgVol'])
-    
-    # 3. Pocket Pivot
+    # 3. Tín hiệu Breakout (Mũi tên Xanh)
+    # Giá vượt đỉnh nền + Vol > 1.3 TB + Trend Tốt
+    df['Breakout'] = (df['close'] > df['HHV_20']) & \
+                     (df['volume'] > 1.3 * df['AvgVol']) & \
+                     (df['close'] > df['MA50'])
+                     
+    # 4. Pocket Pivot (Mũi tên Vàng/Xanh dương - Mua sớm)
+    # Vol > Max Vol giảm 10 phiên
     down_vol = np.where(df['close'] < df['close'].shift(1), df['volume'], 0)
-    max_down = pd.Series(down_vol, index=df.index).rolling(10).max().shift(1)
-    pocket = (df['volume'] > max_down) & (df['close'] > df['MA10']) & (df['close'] > df['close'].shift(1))
+    max_down_10 = pd.Series(down_vol, index=df.index).rolling(10).max().shift(1)
+    df['Pocket_Pivot'] = (df['volume'] > max_down_10) & \
+                         (df['close'] > df['close'].shift(1)) & \
+                         (df['close'] > df['MA20'])
+
+    # 5. Tín hiệu Bán (Mũi tên Đỏ)
+    # Gãy MA20 hoặc Gãy nền
+    df['Sell_Signal'] = (df['close'] < df['MA20']) & (df['close'].shift(1) >= df['MA20'].shift(1))
     
-    # Tín hiệu
-    df['Signal_Wyckoff'] = breakout & base_tight & trend_strong
-    df['Signal_Pocket'] = pocket & (df['close'] > df['MA50'])
+    # 6. Target / Stoploss (ATR)
+    df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=14)
+    # SL: Dưới MA20 một chút hoặc đáy gần nhất
+    df['SL'] = df['close'] - (2 * df['ATR'])
+    # Target: R:R = 1:2
+    df['T1'] = df['close'] + (2 * 2 * df['ATR'])
     
     return df
 
-def resample_weekly(df):
-    """Chuyển dữ liệu Ngày sang Tuần để lọc nhiễu dài hạn"""
-    logic = {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}
-    df_weekly = df.resample('W').apply(logic)
-    return df_weekly
+def calculate_full_indicators(df):
+    """
+    Tính toán full chỉ báo cho 8 Tab
+    """
+    df = calculate_flower_indicator(df)
+    df = calculate_wyckoff_vsa(df)
+    
+    # Bollinger Bands
+    bb = ta.bbands(df['close'], length=20, std=2)
+    if bb is not None:
+        df['BB_Upper'] = bb['BBU_20_2.0']
+        df['BB_Lower'] = bb['BBL_20_2.0']
+        df['BB_Mid'] = bb['BBM_20_2.0']
+        
+    # Ichimoku
+    ichi = ta.ichimoku(df['high'], df['low'], df['close'])[0]
+    df['Tenkan'] = ichi['ITS_9']
+    df['Kijun'] = ichi['IKS_26']
+    df['SpanA'] = ichi['ISA_26']
+    df['SpanB'] = ichi['ISB_26']
+    
+    # RSI & MACD
+    df['RSI'] = ta.rsi(df['close'], length=14)
+    macd = ta.macd(df['close'])
+    df['MACD'] = macd['MACD_12_26_9']
+    df['MACD_Signal'] = macd['MACDs_12_26_9']
+    df['MACD_Hist'] = macd['MACDh_12_26_9']
+    
+    return df
